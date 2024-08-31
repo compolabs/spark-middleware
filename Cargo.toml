@@ -1,0 +1,25 @@
+[package]
+name = "spark-middleware"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+anyhow = "1.0.86"
+chrono = "0.4.38"
+dotenv = "0.15.0"
+fuel-crypto = "0.55.0"
+fuel-types = "0.56.0"
+fuels = { version = "0.65.1", features = ["fuel-core-lib"] }
+futures-util = "0.3"
+hex = "0.4.3"
+log = "0.4.21"
+schemars = "0.8.0"
+serde = { version = "1.0.198", features = ["derive"] }
+serde_json = "1.0.116"
+spark-market-sdk = "0.2.1"
+thiserror = "1.0.63"
+tokio = { version = "1.12", features = ["rt", "macros", "time"] }
+tokio-tungstenite = "0.17.1"
+url = "2.3.1"
