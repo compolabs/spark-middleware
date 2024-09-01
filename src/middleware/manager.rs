@@ -22,6 +22,7 @@ impl OrderManager {
             OrderType::Buy => self.buy_orders.write().await,
             OrderType::Sell => self.sell_orders.write().await,
         };
+        println!("adding order {:?}", &order);
 
         let orders = order_map.entry(order.price).or_default();
 

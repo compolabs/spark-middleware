@@ -1,8 +1,6 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-
-
 // NTD Adapt spark-sdk OrderType to that type
 #[derive(Debug, PartialEq, Eq, Clone, Copy, JsonSchema, Serialize, Deserialize)]
 pub enum OrderType {

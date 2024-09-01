@@ -10,7 +10,10 @@ use tokio_tungstenite::{
 };
 use url::Url;
 
-use crate::{indexer::spot_order::{OrderType, WebSocketResponse}, subscription::envio::format_graphql_subscription};
+use crate::{
+    indexer::spot_order::{OrderType, WebSocketResponse},
+    subscription::envio::format_graphql_subscription,
+};
 
 use super::spot_order::SpotOrder;
 
@@ -37,17 +40,14 @@ impl WebSocketClient {
                 }
             };
 
+            println!("WebSocket connected1");
             info!("WebSocket connected");
+            println!("WebSocket connected2");
 
             ws_stream
                 .send(Message::Text(r#"{"type": "connection_init"}"#.into()))
                 .await
                 .expect("Failed to send init message");
-
-            self.subscribe_to_orders(OrderType::Buy, &mut ws_stream)
-                .await?;
-            self.subscribe_to_orders(OrderType::Sell, &mut ws_stream)
-                .await?;
 
             let mut last_data_time = Instant::now();
             while let Some(message) = ws_stream.next().await {
@@ -76,22 +76,24 @@ impl WebSocketClient {
                                     }
                                 }
                                 "data" => {
-                                        if let Some(payload) = response.payload {
-                                            if let Some(orders) = payload.data.active_buy_order {
-                                                for order_indexer in orders {
-                                                    let spot_order = SpotOrder::from_indexer(order_indexer)?;
-                                                    sender.send(spot_order).await?;
-                                                }
+                                    if let Some(payload) = response.payload {
+                                        if let Some(orders) = payload.data.active_buy_order {
+                                            for order_indexer in orders {
+                                                let spot_order =
+                                                    SpotOrder::from_indexer(order_indexer)?;
+                                                sender.send(spot_order).await?;
                                             }
-                                            if let Some(orders) = payload.data.active_sell_order {
-                                                for order_indexer in orders {
-                                                    let spot_order = SpotOrder::from_indexer(order_indexer)?;
-                                                    sender.send(spot_order).await?;
-                                                }
-                                            }
-                                            last_data_time = Instant::now();
                                         }
+                                        if let Some(orders) = payload.data.active_sell_order {
+                                            for order_indexer in orders {
+                                                let spot_order =
+                                                    SpotOrder::from_indexer(order_indexer)?;
+                                                sender.send(spot_order).await?;
+                                            }
+                                        }
+                                        last_data_time = Instant::now();
                                     }
+                                }
                                 _ => {}
                             }
                         } else {
@@ -145,6 +147,7 @@ impl WebSocketClient {
             }
         })
         .to_string();
+
         client.send(Message::Text(start_msg)).await.map_err(|e| {
             error!("Failed to send subscription: {:?}", e);
             Box::new(e)

@@ -1,5 +1,4 @@
-use crate::config::env::ev;
-use crate::indexer::spot_order::OrderType;
+use crate::{config::env::ev, indexer::spot_order::OrderType};
 
 pub fn format_graphql_subscription(order_type: OrderType) -> String {
     let limit = ev("FETCH_ORDER_LIMIT").unwrap_or_default();
@@ -9,8 +8,10 @@ pub fn format_graphql_subscription(order_type: OrderType) -> String {
     };
 
     format!(
-        r#"query MyQuery {{
-            {}(limit: {}) {{
+        r#"subscription {{
+            {}(
+                limit: {}
+            ) {{
                 id
                 user
                 timestamp
@@ -18,10 +19,6 @@ pub fn format_graphql_subscription(order_type: OrderType) -> String {
                 amount
                 asset
                 price
-                status
-                asset_type
-                db_write_timestamp
-                initial_amount
             }}
         }}"#,
         order_type_str, limit

@@ -22,6 +22,8 @@ in pkgs.stdenv.mkDerivation rec {
     export OPENSSL_DIR="${merged-openssl}"
 
     export RUST_LOG=info
+    FILE_LOG_LEVEL="info"
+    CONSOLE_LOG_LEVEL="info"
     echo "RUST_LOG is set to $RUST_LOG"
 
     echo "middleware environment is ready."
