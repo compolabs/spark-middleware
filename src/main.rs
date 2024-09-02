@@ -1,6 +1,6 @@
 use config::env::ev;
 use error::Error;
-use indexer::{superchain::start_superchain_indexer, websocket::WebSocketClient};
+use indexer::{envio::WebSocketClient, superchain::start_superchain_indexer};
 use middleware::manager::OrderManager;
 use tokio::{signal, sync::mpsc};
 use url::Url;
@@ -16,9 +16,9 @@ async fn main() -> Result<(), Error> {
     dotenv::dotenv().ok();
     env_logger::init();
 
-    let order_manager= OrderManager::new();
+    let order_manager = OrderManager::new();
     //---------{Envio block
-    /* 
+    
     let ws_url_envio = Url::parse(&ev("WEBSOCKET_URL_ENVIO")?)?;
     let websocket_client_envio = WebSocketClient::new(ws_url_envio);
 
@@ -34,13 +34,14 @@ async fn main() -> Result<(), Error> {
 
     let manager_task_envio= tokio::spawn(async move {
         while let Some(order) = rx.recv().await {
-            order_manager_envio.add_order(order).await;
+            arc_order_manager_envio.add_order(order).await;
         }
     });
-    */
+    
     //----------Envio block}
 
     //---------{Superchain block
+
     let (tx_superchain, mut rx_superchain) = mpsc::channel(101);
 
     let ws_task_superchain = tokio::spawn(async move {
@@ -56,9 +57,9 @@ async fn main() -> Result<(), Error> {
             order_manager_superchain.add_order(order).await;
         }
     });
+
     //---------Superchain block}
 
-    
     let ctrl_c_task = tokio::spawn(async {
         signal::ctrl_c().await.expect("failed to listen for event");
         println!("Ctrl+C received!");

@@ -46,10 +46,10 @@ pub struct SpotOrderIndexer {
     pub price: String,
     pub timestamp: String,
     pub order_type: OrderType,
-    pub status: Option<String>,             // Новое поле
-    pub asset_type: Option<String>,         // Новое поле
-    pub db_write_timestamp: Option<String>, // Новое поле
-    pub initial_amount: Option<String>,     // Новое поле
+    pub status: Option<String>,
+    pub asset_type: Option<String>,
+    pub db_write_timestamp: Option<String>,
+    pub initial_amount: Option<String>,
 }
 
 impl SpotOrder {

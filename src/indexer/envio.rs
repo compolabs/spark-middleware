@@ -1,21 +1,16 @@
 use futures_util::{SinkExt, StreamExt};
 use log::{error, info};
-use tokio::{
-    net::TcpStream,
-    sync::mpsc,
-    time::{Duration, Instant},
-};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use tokio::{net::TcpStream, sync::mpsc, time::Instant};
 use tokio_tungstenite::{
     connect_async, tungstenite::protocol::Message, MaybeTlsStream, WebSocketStream,
 };
 use url::Url;
 
 use crate::{
-    indexer::spot_order::{OrderType, WebSocketResponse},
+    indexer::spot_order::{OrderType, SpotOrder, WebSocketResponse},
     subscription::envio::format_graphql_subscription,
 };
-
-use super::spot_order::SpotOrder;
 
 pub struct WebSocketClient {
     pub url: Url,
@@ -40,9 +35,7 @@ impl WebSocketClient {
                 }
             };
 
-            println!("WebSocket connected1");
             info!("WebSocket connected");
-            println!("WebSocket connected2");
 
             ws_stream
                 .send(Message::Text(r#"{"type": "connection_init"}"#.into()))
@@ -57,12 +50,13 @@ impl WebSocketClient {
                 }
                 match message {
                     Ok(Message::Text(text)) => {
+                        let receive_time = SystemTime::now(); // Записываем время получения сообщения
+
                         if let Ok(response) = serde_json::from_str::<WebSocketResponse>(&text) {
                             match response.r#type.as_str() {
                                 "ka" => {
                                     info!("Received keep-alive message.");
-                                    let b = Instant::now().duration_since(last_data_time);
-                                    info!("time from last data: {:?}", b);
+                                    last_data_time = Instant::now();
                                     continue;
                                 }
                                 "connection_ack" => {
@@ -81,6 +75,8 @@ impl WebSocketClient {
                                             for order_indexer in orders {
                                                 let spot_order =
                                                     SpotOrder::from_indexer(order_indexer)?;
+                                                self.log_order_delay(&spot_order, receive_time)
+                                                    .await;
                                                 sender.send(spot_order).await?;
                                             }
                                         }
@@ -88,6 +84,8 @@ impl WebSocketClient {
                                             for order_indexer in orders {
                                                 let spot_order =
                                                     SpotOrder::from_indexer(order_indexer)?;
+                                                self.log_order_delay(&spot_order, receive_time)
+                                                    .await;
                                                 sender.send(spot_order).await?;
                                             }
                                         }
@@ -170,5 +168,23 @@ impl WebSocketClient {
             Box::new(e)
         })?;
         Ok(())
+    }
+
+    async fn log_order_delay(&self, order: &SpotOrder, receive_time: SystemTime) {
+        // Временная метка блока
+        let block_timestamp = order.timestamp;
+
+        // Временная метка получения ордера по вебсокету в секундах с начала Unix-эпохи
+        let receive_timestamp = receive_time.duration_since(UNIX_EPOCH).unwrap().as_secs();
+
+        if receive_timestamp >= block_timestamp {
+            let delay = receive_timestamp - block_timestamp;
+            info!("Order ID: {:?} Delay: {} seconds", order.id, delay);
+        } else {
+            error!(
+                "Receive timestamp is earlier than block timestamp for order ID: {:?}",
+                order.id
+            );
+        }
     }
 }
