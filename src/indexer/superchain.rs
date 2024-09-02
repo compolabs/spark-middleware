@@ -71,6 +71,7 @@ pub async fn start_superchain_indexer(
     let mut h_s_state_types = HashSet::new();
     h_s_state_types.insert(OrderChangeType::Open);
     h_s_state_types.insert(OrderChangeType::Match);
+    h_s_state_types.insert(OrderChangeType::Cancel);
 
     let client = ClientBuilder::default()
         .credential(&username, &password)
@@ -83,7 +84,7 @@ pub async fn start_superchain_indexer(
     let request = GetSparkOrderRequest {
         from_block: Bound::FromLatest(3),
         to_block: Bound::None,
-        state_type__in: h_s_state_types,
+        order_type__in: h_s_state_types,
         ..Default::default()
     };
 
@@ -110,8 +111,10 @@ pub async fn start_superchain_indexer(
 
     // Основная обработка входящих ордеров
     while let Some(data) = stream.next().await {
+        info!("===============");
         let data = data.unwrap();
         let data_str = String::from_utf8(data).unwrap();
+        info!("data str {:?}",data_str);
         let superchain_order: SuperchainOrder = serde_json::from_str(&data_str)?;
         let order_id = &superchain_order.order_id.clone();
         let b_num = superchain_order.block_number.clone();
