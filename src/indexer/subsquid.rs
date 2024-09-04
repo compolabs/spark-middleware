@@ -1,32 +1,26 @@
+use async_tungstenite::tokio::{connect_async, TokioAdapter};
+use async_tungstenite::tungstenite::protocol::Message;
 use futures_util::{SinkExt, StreamExt};
 use log::{error, info};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
-use tokio::{net::TcpStream, sync::mpsc, time::Instant};
-use tokio_tungstenite::{
-    connect_async, tungstenite::protocol::Message, MaybeTlsStream, WebSocketStream,
-};
+use tokio::net::TcpStream;
+use tokio::sync::mpsc;
 use url::Url;
+use crate::{error::Error, indexer::spot_order::SpotOrder};
 
-use crate::{
-    indexer::spot_order::{OrderType, SpotOrder, WebSocketResponse},
-    subscription::envio::format_graphql_subscription,
-};
-
-pub struct WebSocketClient {
+pub struct WebSocketClientSubsquid {
     pub url: Url,
 }
 
-impl WebSocketClient {
+impl WebSocketClientSubsquid {
     pub fn new(url: Url) -> Self {
-        WebSocketClient { url }
+        WebSocketClientSubsquid { url }
     }
 
     pub async fn connect(
         &self,
         sender: mpsc::Sender<SpotOrder>,
-    ) -> Result<(), Box<dyn std::error::Error>> {
+    ) -> Result<(), Error> {
         loop {
-            let mut initialized = false;
             let mut ws_stream = match self.connect_to_ws().await {
                 Ok(ws_stream) => ws_stream,
                 Err(e) => {
@@ -35,156 +29,103 @@ impl WebSocketClient {
                 }
             };
 
-            info!("WebSocket connected");
+            info!("WebSocket connected to Subsquid");
 
             ws_stream
-                .send(Message::Text(r#"{"type": "connection_init"}"#.into()))
+                .send(Message::Text(r#"{"type": "connection_init", "payload": {}}"#.into()))
                 .await
                 .expect("Failed to send init message");
 
-            let mut last_data_time = Instant::now();
+            info!("Connection init message sent, waiting for connection_ack...");
+
+            let mut last_data_time = tokio::time::Instant::now();
+            let mut initialized = false;
+
             while let Some(message) = ws_stream.next().await {
-                if Instant::now().duration_since(last_data_time) > Duration::from_secs(60) {
+                if last_data_time.elapsed() > tokio::time::Duration::from_secs(60) {
                     error!("No data messages received for the last 60 seconds, reconnecting...");
                     break;
                 }
+
                 match message {
                     Ok(Message::Text(text)) => {
-                        let receive_time = SystemTime::now(); // Записываем время получения сообщения
+                        info!("Received message: {}", text);
 
-                        if let Ok(response) = serde_json::from_str::<WebSocketResponse>(&text) {
-                            match response.r#type.as_str() {
-                                "ka" => {
-                                    info!("Received keep-alive message.");
-                                    last_data_time = Instant::now();
-                                    continue;
+                        if text.contains("\"type\":\"connection_ack\"") {
+                            initialized = true;
+                            info!("Connection established, subscribing to data...");
+
+                            let subscription_query = r#"
+                            subscription {
+                                orders(limit: 5, orderBy: timestamp_DESC) {
+                                    id
                                 }
-                                "connection_ack" => {
-                                    if !initialized {
-                                        info!("Connection established, subscribing to orders...");
-                                        self.subscribe_to_orders(OrderType::Buy, &mut ws_stream)
-                                            .await?;
-                                        self.subscribe_to_orders(OrderType::Sell, &mut ws_stream)
-                                            .await?;
-                                        initialized = true;
-                                    }
+                            }"#;
+
+                            let subscription_message = serde_json::json!({
+                                "id": "1",
+                                "type": "subscribe",
+                                "payload": {
+                                    "query": subscription_query,
+                                    "variables": {}
                                 }
-                                "data" => {
-                                    if let Some(payload) = response.payload {
-                                        if let Some(orders) = payload.data.active_buy_order {
-                                            for order_indexer in orders {
-                                                let spot_order =
-                                                    SpotOrder::from_indexer(order_indexer)?;
-                                                self.log_order_delay(&spot_order, receive_time)
-                                                    .await;
-                                                sender.send(spot_order).await?;
-                                            }
-                                        }
-                                        if let Some(orders) = payload.data.active_sell_order {
-                                            for order_indexer in orders {
-                                                let spot_order =
-                                                    SpotOrder::from_indexer(order_indexer)?;
-                                                self.log_order_delay(&spot_order, receive_time)
-                                                    .await;
-                                                sender.send(spot_order).await?;
-                                            }
-                                        }
-                                        last_data_time = Instant::now();
-                                    }
-                                }
-                                _ => {}
-                            }
-                        } else {
-                            error!("Failed to deserialize WebSocketResponse: {:?}", text);
+                            });
+
+                            ws_stream
+                                .send(Message::Text(subscription_message.to_string()))
+                                .await
+                                .expect("Failed to send subscription message");
+
+                            info!("Subscription message sent.");
                         }
+
+                        if text.contains("\"type\":\"next\"") {
+                            info!("Received subscription data: {}", text);
+
+                            if let Ok(response) = serde_json::from_str::<serde_json::Value>(&text) {
+                                info!("Parsed response: {:?}", response);
+                            } else {
+                                error!("Failed to deserialize WebSocket response: {:?}", text);
+                            }
+                        }
+
+                        last_data_time = tokio::time::Instant::now();
                     }
-                    Ok(_) => {}
+                    Ok(Message::Close(frame)) => {
+                        if let Some(frame) = frame {
+                            error!("WebSocket connection closed by server: code = {}, reason = {}", frame.code, frame.reason);
+                        } else {
+                            error!("WebSocket connection closed by server without a frame.");
+                        }
+                        break;
+                    }
                     Err(e) => {
                         error!("Error in websocket connection: {:?}", e);
                         break;
                     }
+                    _ => {}
+                }
+
+                if initialized {
+                    last_data_time = tokio::time::Instant::now();
                 }
             }
-
-            self.unsubscribe_orders(&mut ws_stream, OrderType::Buy)
-                .await?;
-            self.unsubscribe_orders(&mut ws_stream, OrderType::Sell)
-                .await?;
         }
     }
 
     async fn connect_to_ws(
         &self,
-    ) -> Result<WebSocketStream<MaybeTlsStream<TcpStream>>, Box<dyn std::error::Error>> {
-        match connect_async(&self.url).await {
-            Ok((ws_stream, response)) => {
-                info!(
-                    "WebSocket handshake has been successfully completed with response: {:?}",
-                    response
-                );
-                Ok(ws_stream)
-            }
-            Err(e) => {
-                error!("Failed to establish websocket connection: {:?}", e);
-                Err(Box::new(e))
-            }
-        }
-    }
+    ) -> Result<async_tungstenite::WebSocketStream<TokioAdapter<TcpStream>>, Box<dyn std::error::Error>> {
+        let url = self.url.to_string();
 
-    async fn subscribe_to_orders(
-        &self,
-        order_type: OrderType,
-        client: &mut WebSocketStream<MaybeTlsStream<TcpStream>>,
-    ) -> Result<(), Box<dyn std::error::Error>> {
-        let subscription_query = format_graphql_subscription(order_type);
-        let start_msg = serde_json::json!({
-            "id": format!("{}", order_type as u8),
-            "type": "start",
-            "payload": {
-                "query": subscription_query
-            }
-        })
-        .to_string();
+        let request = async_tungstenite::tungstenite::handshake::client::Request::builder()
+            .uri(url)
+            .header("Sec-WebSocket-Protocol", "graphql-transport-ws") // Указываем нужный протокол
+            .body(())
+            .unwrap();
 
-        client.send(Message::Text(start_msg)).await.map_err(|e| {
-            error!("Failed to send subscription: {:?}", e);
-            Box::new(e)
-        })?;
-        Ok(())
-    }
+        let (ws_stream, _) = connect_async(request).await?;
 
-    async fn unsubscribe_orders(
-        &self,
-        client: &mut WebSocketStream<MaybeTlsStream<TcpStream>>,
-        order_type: OrderType,
-    ) -> Result<(), Box<dyn std::error::Error>> {
-        let stop_msg = serde_json::json!({
-            "id": format!("{}", order_type as u8),
-            "type": "stop"
-        })
-        .to_string();
-        client.send(Message::Text(stop_msg)).await.map_err(|e| {
-            error!("Failed to send unsubscribe message: {:?}", e);
-            Box::new(e)
-        })?;
-        Ok(())
-    }
-
-    async fn log_order_delay(&self, order: &SpotOrder, receive_time: SystemTime) {
-        // Временная метка блока
-        let block_timestamp = order.timestamp;
-
-        // Временная метка получения ордера по вебсокету в секундах с начала Unix-эпохи
-        let receive_timestamp = receive_time.duration_since(UNIX_EPOCH).unwrap().as_secs();
-
-        if receive_timestamp >= block_timestamp {
-            let delay = receive_timestamp - block_timestamp;
-            info!("Order ID: {:?} Delay: {} seconds", order.id, delay);
-        } else {
-            error!(
-                "Receive timestamp is earlier than block timestamp for order ID: {:?}",
-                order.id
-            );
-        }
+        Ok(ws_stream)
     }
 }

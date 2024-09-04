@@ -1,6 +1,6 @@
 use config::env::ev;
 use error::Error;
-use indexer::{envio::WebSocketClient, superchain::start_superchain_indexer};
+use indexer::{envio::WebSocketClientEnvio, subsquid::WebSocketClientSubsquid, superchain::start_superchain_indexer};
 use middleware::manager::OrderManager;
 use tokio::{signal, sync::mpsc};
 use url::Url;
@@ -18,9 +18,9 @@ async fn main() -> Result<(), Error> {
 
     let order_manager = OrderManager::new();
     //---------{Envio block
-    
+/*        
     let ws_url_envio = Url::parse(&ev("WEBSOCKET_URL_ENVIO")?)?;
-    let websocket_client_envio = WebSocketClient::new(ws_url_envio);
+    let websocket_client_envio = WebSocketClientEnvio::new(ws_url_envio);
 
     let (tx, mut rx) = mpsc::channel(100);
 
@@ -37,11 +37,34 @@ async fn main() -> Result<(), Error> {
             arc_order_manager_envio.add_order(order).await;
         }
     });
-    
+*/    
     //----------Envio block}
 
-    //---------{Superchain block
+    //---------{Subsquid block
+    
+    let ws_url_subsquid = Url::parse(&ev("WEBSOCKET_URL_SUBSQUID")?)?;
+    let websocket_client_subsquid= WebSocketClientSubsquid::new(ws_url_subsquid);
 
+    let (tx, mut rx) = mpsc::channel(102);
+
+    let ws_task_subsquid = tokio::spawn(async move {
+        if let Err(e) = websocket_client_subsquid.connect(tx).await {
+            eprintln!("WebSocket subsquid error: {}", e);
+        }
+    });
+
+    let arc_order_manager_subsquid = order_manager.clone();
+
+    let manager_task_subsquid= tokio::spawn(async move {
+        while let Some(order) = rx.recv().await {
+            arc_order_manager_subsquid.add_order(order).await;
+        }
+    });
+    
+    //----------Subsquid block}
+
+    //---------{Superchain block
+/*    
     let (tx_superchain, mut rx_superchain) = mpsc::channel(101);
 
     let ws_task_superchain = tokio::spawn(async move {
@@ -57,7 +80,7 @@ async fn main() -> Result<(), Error> {
             order_manager_superchain.add_order(order).await;
         }
     });
-
+*/
     //---------Superchain block}
 
     let ctrl_c_task = tokio::spawn(async {
@@ -66,10 +89,12 @@ async fn main() -> Result<(), Error> {
     });
 
     let _ = tokio::select! {
-        //_ = ws_task_envio => { println!("WebSocket task finished"); },
-        //_ = manager_task_envio => { println!("Order manager task finished"); },
-        _ = ws_task_superchain => { println!("WebSocket superchain task finished"); },
-        _ = manager_task_superchain => { println!("Order manager superchain task finished"); },
+//        _ = ws_task_envio => { println!("WebSocket task finished"); },
+//        _ = manager_task_envio => { println!("Order manager task finished"); },
+        _ = ws_task_subsquid => { println!("WebSocket task finished"); },
+        _ = manager_task_subsquid => { println!("Order manager task finished"); },
+//        _ = ws_task_superchain => { println!("WebSocket superchain task finished"); },
+//        _ = manager_task_superchain => { println!("Order manager superchain task finished"); },
         _ = ctrl_c_task => { println!("Shutting down..."); },
     };
 
