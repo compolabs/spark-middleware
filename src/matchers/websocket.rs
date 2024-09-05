@@ -25,7 +25,7 @@ impl MatcherWebSocket {
 
     pub async fn handle_connection(
         &self,
-        mut ws_stream: WebSocketStream<MaybeTlsStream<TcpStream>>,
+        mut ws_stream: WebSocketStream<TcpStream>,
         sender: mpsc::Sender<String>,  
     ) {
         if let Some(message) = ws_stream.next().await {
@@ -45,7 +45,7 @@ impl MatcherWebSocket {
                             }
                         }
                         Err(e) => {
-                            error!("Failed to parse MatcherConnectRequest: {:?}", e);
+                            error!("Failed to parse MatcherConnectRequest: {:?}, raw message: {}", e, text);
                             let _ = ws_stream
                                 .send(Message::Text("Invalid request format".to_string()))
                                 .await;
@@ -65,7 +65,7 @@ impl MatcherWebSocket {
 
     async fn process_matcher(
         &self,
-        mut ws_stream: WebSocketStream<MaybeTlsStream<TcpStream>>,
+        mut ws_stream: WebSocketStream<TcpStream>,
         sender: mpsc::Sender<String>,  
     ) {
         while let Some(message) = ws_stream.next().await {

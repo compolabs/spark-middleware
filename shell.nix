@@ -8,7 +8,7 @@ let
     paths = [ pkgs.openssl.out pkgs.openssl.dev ];
   };
 in pkgs.stdenv.mkDerivation rec {
-  name = "matcher";
+  name = "spark-middleware";
   env = pkgs.buildEnv { name = name; paths = buildInputs; };
 
   buildInputs = [

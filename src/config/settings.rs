@@ -31,6 +31,7 @@ pub struct ContractSettings {
 #[derive(Debug, Clone, Deserialize)]
 pub struct MatchersSettings{
     pub matchers: Vec<String>,
+    pub matcher_ws_url: String,
 }
 
 impl Settings {
