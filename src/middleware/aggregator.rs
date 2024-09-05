@@ -20,7 +20,7 @@ impl Aggregator {
     }
 
     pub async fn get_aggregated_orders(&self, order_type: OrderType) -> Vec<SpotOrder> {
-        if self.active_indexers.len() >= 2 {
+        if self.active_indexers.len() > 4 {
             self.get_orders_with_consensus(order_type).await
         } else {
           

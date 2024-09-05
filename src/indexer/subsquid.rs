@@ -56,6 +56,7 @@ impl WebSocketClientSubsquid {
                         }
 
                         if text.contains("\"type\":\"next\"") {
+                            let mut orders_to_add = Vec::new();
 
                             if let Ok(response) = serde_json::from_str::<serde_json::Value>(&text) {
                                 if let Some(orders) = response["payload"]["data"]["activeBuyOrders"].as_array() {
@@ -63,11 +64,8 @@ impl WebSocketClientSubsquid {
                                         let subsquid_order: SubsquidOrder = serde_json::from_value(order.clone()).unwrap();
                                         match SpotOrder::from_indexer_subsquid(subsquid_order) {
                                             Ok(spot_order) => {
-                                                info!("Sending Buy Order to manager: {:?}", spot_order);
-                                                let mananger_message = OrderManagerMessage::AddOrder(spot_order);
-                                                if let Err(e) = sender.send(mananger_message).await {
-                                                    error!("Failed to send order to manager: {:?}", e);
-                                                }
+                                                info!("Adding Buy Order to the list: {:?}", spot_order);
+                                                orders_to_add.push(spot_order);
                                             }
                                             Err(e) => error!("Failed to parse Subsquid order: {:?}", e),
                                         }
@@ -78,15 +76,16 @@ impl WebSocketClientSubsquid {
                                         let subsquid_order: SubsquidOrder = serde_json::from_value(order.clone()).unwrap();
                                         match SpotOrder::from_indexer_subsquid(subsquid_order) {
                                             Ok(spot_order) => {
-                                                info!("Sending Sell Order to manager: {:?}", spot_order);
-                                                let mananger_message = OrderManagerMessage::AddOrder(spot_order);
-                                                if let Err(e) = sender.send(mananger_message).await {
-                                                    error!("Failed to send order to manager: {:?}", e);
-                                                }
+                                                info!("Adding Sell Order to the list: {:?}", spot_order);
+                                                orders_to_add.push(spot_order);
                                             }
                                             Err(e) => error!("Failed to parse Subsquid order: {:?}", e),
                                         }
                                     }
+                                }
+
+                                if !orders_to_add.is_empty() {
+                                    sender.send(OrderManagerMessage::ClearAndAddOrders(orders_to_add)).await?;
                                 }
                             } else {
                                 error!("Failed to deserialize WebSocket response: {:?}", text);

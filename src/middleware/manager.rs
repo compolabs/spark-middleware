@@ -4,7 +4,6 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
-
 #[derive(Debug)]
 pub enum OrderManagerMessage {
     AddOrder(SpotOrder),
@@ -13,6 +12,7 @@ pub enum OrderManagerMessage {
         price: u128,
         order_type: OrderType,
     },
+    ClearAndAddOrders(Vec<SpotOrder>), 
 }
 
 pub struct OrderManager {
@@ -33,6 +33,9 @@ impl OrderManager {
             OrderManagerMessage::AddOrder(order) => self.add_order(order).await,
             OrderManagerMessage::RemoveOrder { order_id, price, order_type } => {
                 self.remove_order(&order_id, price, order_type).await
+            }
+            OrderManagerMessage::ClearAndAddOrders(orders) => {
+                self.clear_and_add_orders(orders).await;
             }
         }
     }
@@ -68,6 +71,20 @@ impl OrderManager {
             info!("Removed order with id: {}", order_id);
         }
     }
+
+    pub async fn clear_and_add_orders(&self, orders: Vec<SpotOrder>) {
+        println!("========================");
+        println!("========================");
+        println!("========================");
+        println!("{:?}",orders);
+        if orders.len() > 0 {
+            self.clear_orders().await;
+            for order in orders {
+                self.add_order(order).await;
+            }
+        }
+    }
+
     pub async fn clear_orders(&self) {
         let mut buy_orders = self.buy_orders.write().await;
         let mut sell_orders = self.sell_orders.write().await;
