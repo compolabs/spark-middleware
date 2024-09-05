@@ -1,104 +1,126 @@
-use config::env::ev;
+use config::settings::Settings;
 use error::Error;
+use futures_util::future::{join_all, select};
+use futures_util::future::FutureExt;
 use indexer::{envio::WebSocketClientEnvio, subsquid::WebSocketClientSubsquid, superchain::start_superchain_indexer};
 use middleware::manager::OrderManager;
+use std::{collections::HashMap, sync::Arc};
 use tokio::{signal, sync::mpsc};
 use url::Url;
+use web::server::rocket;
 
 pub mod config;
 pub mod error;
 pub mod indexer;
 pub mod middleware;
 pub mod subscription;
+pub mod web;
 
 #[tokio::main]
 async fn main() -> Result<(), Error> {
     dotenv::dotenv().ok();
     env_logger::init();
 
-    let order_manager = OrderManager::new();
-    //---------{Envio block
-/*        
-    let ws_url_envio = Url::parse(&ev("WEBSOCKET_URL_ENVIO")?)?;
-    let websocket_client_envio = WebSocketClientEnvio::new(ws_url_envio);
+    let settings = Settings::new();
+    let mut tasks = vec![];
 
-    let (tx, mut rx) = mpsc::channel(100);
+    let mut order_managers: HashMap<String, Arc<OrderManager>> = HashMap::new();
 
-    let ws_task_envio = tokio::spawn(async move {
-        if let Err(e) = websocket_client_envio.connect(tx).await {
-            eprintln!("WebSocket envio error: {}", e);
-        }
+    if settings.settings.active_indexers.contains(&"envio".to_string()) {
+        let ws_url_envio = Url::parse(&settings.websockets.envio_url)?;
+        let websocket_client_envio = WebSocketClientEnvio::new(ws_url_envio);
+
+        let (tx, mut rx) = mpsc::channel(100);
+        let ws_task_envio = tokio::spawn(async move {
+            if let Err(e) = websocket_client_envio.connect(tx).await {
+                eprintln!("WebSocket envio error: {}", e);
+            }
+        });
+
+        let order_manager_envio = OrderManager::new();  
+        order_managers.insert("envio".to_string(), order_manager_envio.clone());
+
+        let manager_task_envio = tokio::spawn(async move {
+            while let Some(order) = rx.recv().await {
+                order_manager_envio.add_order(order).await;
+            }
+        });
+
+        tasks.push(ws_task_envio);
+        tasks.push(manager_task_envio);
+    }
+
+    if settings.settings.active_indexers.contains(&"subsquid".to_string()) {
+        let ws_url_subsquid = Url::parse(&settings.websockets.subsquid_url)?;
+        let websocket_client_subsquid = WebSocketClientSubsquid::new(ws_url_subsquid);
+
+        let (tx, mut rx) = mpsc::channel(102);
+        let ws_task_subsquid = tokio::spawn(async move {
+            if let Err(e) = websocket_client_subsquid.connect(tx).await {
+                eprintln!("WebSocket subsquid error: {}", e);
+            }
+        });
+
+        let order_manager_subsquid = OrderManager::new();  
+        order_managers.insert("subsquid".to_string(), order_manager_subsquid.clone());
+
+        let manager_task_subsquid = tokio::spawn(async move {
+            while let Some(order) = rx.recv().await {
+                order_manager_subsquid.add_order(order).await;
+            }
+        });
+
+        tasks.push(ws_task_subsquid);
+        tasks.push(manager_task_subsquid);
+    }
+
+    // Подключение к индексатору Superchain
+    if settings.settings.active_indexers.contains(&"superchain".to_string()) {
+        let (tx_superchain, mut rx_superchain) = mpsc::channel(101);
+
+        let ws_task_superchain = tokio::spawn(async move {
+            if let Err(e) = start_superchain_indexer(tx_superchain, settings).await {
+                eprintln!("Superchain error: {}", e);
+            }
+        });
+
+        let order_manager_superchain = OrderManager::new();  
+        order_managers.insert("superchain".to_string(), order_manager_superchain.clone());
+
+        let manager_task_superchain = tokio::spawn(async move {
+            while let Some(order) = rx_superchain.recv().await {
+                order_manager_superchain.add_order(order).await;
+            }
+        });
+
+        tasks.push(ws_task_superchain);
+        tasks.push(manager_task_superchain);
+    }
+
+    let rocket_task = tokio::spawn(async move {
+        let rocket = rocket(order_managers.clone());  
+        let _ = rocket.launch().await;
     });
 
-    let arc_order_manager_envio = order_manager.clone();
-
-    let manager_task_envio= tokio::spawn(async move {
-        while let Some(order) = rx.recv().await {
-            arc_order_manager_envio.add_order(order).await;
-        }
-    });
-*/    
-    //----------Envio block}
-
-    //---------{Subsquid block
-    
-    let ws_url_subsquid = Url::parse(&ev("WEBSOCKET_URL_SUBSQUID")?)?;
-    let websocket_client_subsquid= WebSocketClientSubsquid::new(ws_url_subsquid);
-
-    let (tx, mut rx) = mpsc::channel(102);
-
-    let ws_task_subsquid = tokio::spawn(async move {
-        if let Err(e) = websocket_client_subsquid.connect(tx).await {
-            eprintln!("WebSocket subsquid error: {}", e);
-        }
-    });
-
-    let arc_order_manager_subsquid = order_manager.clone();
-
-    let manager_task_subsquid= tokio::spawn(async move {
-        while let Some(order) = rx.recv().await {
-            arc_order_manager_subsquid.add_order(order).await;
-        }
-    });
-    
-    //----------Subsquid block}
-
-    //---------{Superchain block
-/*    
-    let (tx_superchain, mut rx_superchain) = mpsc::channel(101);
-
-    let ws_task_superchain = tokio::spawn(async move {
-        if let Err(e) = start_superchain_indexer(tx_superchain).await {
-            eprintln!("Superchain error: {}", e);
-        }
-    });
-
-    let order_manager_superchain = order_manager.clone();
-
-    let manager_task_superchain = tokio::spawn(async move {
-        while let Some(order) = rx_superchain.recv().await {
-            order_manager_superchain.add_order(order).await;
-        }
-    });
-*/
-    //---------Superchain block}
+    tasks.push(rocket_task);
 
     let ctrl_c_task = tokio::spawn(async {
         signal::ctrl_c().await.expect("failed to listen for event");
         println!("Ctrl+C received!");
     });
 
-    let _ = tokio::select! {
-//        _ = ws_task_envio => { println!("WebSocket task finished"); },
-//        _ = manager_task_envio => { println!("Order manager task finished"); },
-        _ = ws_task_subsquid => { println!("WebSocket task finished"); },
-        _ = manager_task_subsquid => { println!("Order manager task finished"); },
-//        _ = ws_task_superchain => { println!("WebSocket superchain task finished"); },
-//        _ = manager_task_superchain => { println!("Order manager superchain task finished"); },
-        _ = ctrl_c_task => { println!("Shutting down..."); },
-    };
+    tasks.push(ctrl_c_task);
+
+    let shutdown_signal = signal::ctrl_c().map(|_| {
+        println!("Shutting down gracefully...");
+    });
+
+    select(
+        join_all(tasks).boxed(),   
+        shutdown_signal.boxed(),   
+    )
+    .await;
 
     println!("Application is shutting down.");
-
     Ok(())
 }

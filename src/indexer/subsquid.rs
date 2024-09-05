@@ -5,7 +5,8 @@ use log::{error, info};
 use tokio::net::TcpStream;
 use tokio::sync::mpsc;
 use url::Url;
-use crate::{error::Error, indexer::spot_order::SpotOrder};
+use crate::indexer::spot_order::OrderType;
+use crate::{error::Error, indexer::spot_order::{SpotOrder, SubsquidOrder}, subscription::subsquid::format_graphql_subscription};
 
 pub struct WebSocketClientSubsquid {
     pub url: Url,
@@ -38,58 +39,64 @@ impl WebSocketClientSubsquid {
 
             info!("Connection init message sent, waiting for connection_ack...");
 
-            let mut last_data_time = tokio::time::Instant::now();
             let mut initialized = false;
 
             while let Some(message) = ws_stream.next().await {
-                if last_data_time.elapsed() > tokio::time::Duration::from_secs(60) {
-                    error!("No data messages received for the last 60 seconds, reconnecting...");
-                    break;
-                }
-
                 match message {
                     Ok(Message::Text(text)) => {
-                        info!("Received message: {}", text);
 
                         if text.contains("\"type\":\"connection_ack\"") {
                             initialized = true;
-                            info!("Connection established, subscribing to data...");
+                            info!("Connection established, subscribing to orders...");
 
-                            let subscription_query = r#"
-                            subscription {
-                                orders(limit: 5, orderBy: timestamp_DESC) {
-                                    id
-                                }
-                            }"#;
-
-                            let subscription_message = serde_json::json!({
-                                "id": "1",
-                                "type": "subscribe",
-                                "payload": {
-                                    "query": subscription_query,
-                                    "variables": {}
-                                }
-                            });
-
-                            ws_stream
-                                .send(Message::Text(subscription_message.to_string()))
-                                .await
-                                .expect("Failed to send subscription message");
-
-                            info!("Subscription message sent.");
+                            // Подписка на buy и sell ордера
+                            self.subscribe_to_orders(OrderType::Buy, &mut ws_stream).await?;
+                            self.subscribe_to_orders(OrderType::Sell, &mut ws_stream).await?;
                         }
 
                         if text.contains("\"type\":\"next\"") {
-                            info!("Received subscription data: {}", text);
 
+                            info!("======= nice");
                             if let Ok(response) = serde_json::from_str::<serde_json::Value>(&text) {
-                                info!("Parsed response: {:?}", response);
+                                info!("======= nice2");
+                                info!("response {:?}", response);
+                                info!("======= nice2");
+                                if let Some(orders) = response["payload"]["data"]["activeBuyOrders"].as_array() {
+                                    info!("======= nice buy 3");
+                                    for order in orders {
+                                        info!("======= nice buy 4 {:?}", order);
+                                        let subsquid_order: SubsquidOrder = serde_json::from_value(order.clone()).unwrap();
+                                        match SpotOrder::from_indexer_subsquid(subsquid_order) {
+                                            Ok(spot_order) => {
+                                                info!("Sending Buy Order to manager: {:?}", spot_order);
+                                                if let Err(e) = sender.send(spot_order).await {
+                                                    error!("Failed to send order to manager: {:?}", e);
+                                                }
+                                            }
+                                            Err(e) => error!("Failed to parse Subsquid order: {:?}", e),
+                                        }
+                                    }
+                                }
+                                if let Some(orders) = response["payload"]["data"]["activeSellOrders"].as_array() {
+                                    info!("======= nice sell 3");
+                                    for order in orders {
+                                        info!("======= nice sell 4 {:?}", order);
+                                        let subsquid_order: SubsquidOrder = serde_json::from_value(order.clone()).unwrap();
+                                        match SpotOrder::from_indexer_subsquid(subsquid_order) {
+                                            Ok(spot_order) => {
+                                                info!("Sending Sell Order to manager: {:?}", spot_order);
+                                                if let Err(e) = sender.send(spot_order).await {
+                                                    error!("Failed to send order to manager: {:?}", e);
+                                                }
+                                            }
+                                            Err(e) => error!("Failed to parse Subsquid order: {:?}", e),
+                                        }
+                                    }
+                                }
                             } else {
                                 error!("Failed to deserialize WebSocket response: {:?}", text);
                             }
                         }
-
-                        last_data_time = tokio::time::Instant::now();
                     }
                     Ok(Message::Close(frame)) => {
                         if let Some(frame) = frame {
@@ -105,10 +112,6 @@ impl WebSocketClientSubsquid {
                     }
                     _ => {}
                 }
-
-                if initialized {
-                    last_data_time = tokio::time::Instant::now();
-                }
             }
         }
     }
@@ -120,12 +123,39 @@ impl WebSocketClientSubsquid {
 
         let request = async_tungstenite::tungstenite::handshake::client::Request::builder()
             .uri(url)
-            .header("Sec-WebSocket-Protocol", "graphql-transport-ws") // Указываем нужный протокол
+            .header("Sec-WebSocket-Protocol", "graphql-transport-ws")
             .body(())
             .unwrap();
 
         let (ws_stream, _) = connect_async(request).await?;
 
         Ok(ws_stream)
+    }
+
+    async fn subscribe_to_orders(
+        &self,
+        order_type: OrderType,
+        client: &mut async_tungstenite::WebSocketStream<TokioAdapter<TcpStream>>,
+    ) -> Result<(), Error> {
+        let subscription_query = format_graphql_subscription(order_type);
+        let subscription_message = serde_json::json!({
+            "id": format!("{}", order_type as u8),
+            "type": "subscribe",
+            "payload": {
+                "query": subscription_query
+            }
+        });
+
+        info!("Subscribing to {:?} orders...", order_type);
+
+        client
+            .send(Message::Text(subscription_message.to_string()))
+            .await
+            .map_err(|e| {
+                error!("Failed to send subscription message: {:?}", e);
+                e
+            })?;
+
+        Ok(())
     }
 }

@@ -1,4 +1,4 @@
-use log::info;
+use log::{info, error};
 use serde::Deserialize;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -13,14 +13,9 @@ use superchain_client::{
 };
 use tokio::sync::{mpsc, Mutex};
 
+use crate::config::settings::Settings;
 use crate::error::Error;
 use crate::{config::env::ev, indexer::spot_order::SpotOrder};
-
-#[derive(Debug)]
-struct ReceivedOrder {
-    order: SuperchainOrder,
-    receive_time: u64, 
-}
 
 #[derive(Debug, Deserialize)]
 struct SuperchainOrder {
@@ -48,15 +43,17 @@ struct SuperchainOrder {
 
 pub async fn start_superchain_indexer(
     sender: mpsc::Sender<SpotOrder>,
+    config: Settings
 ) -> Result<(), Error> {
-    let username = ev("SUPERCHAIN_USERNAME")?;
-    let password = ev("SUPERCHAIN_PASSWORD")?;
-    let _contract_id = ev("CONTRACT_ID_BTC_USDC")?;
+    let username = config.websockets.superchain_username;
+    let password = config.websockets.superchain_pass; 
 
     let mut h_s_state_types = HashSet::new();
     h_s_state_types.insert(OrderChangeType::Open);
-    h_s_state_types.insert(OrderChangeType::Match);
-    h_s_state_types.insert(OrderChangeType::Cancel);
+    // ====================
+    // NTD Not works at all
+    //[2024-09-05T02:24:29Z ERROR spark_middleware::indexer::superchain] Error ErrorMsg("{\"status\":400,\"error\":\"unknown order type: Open\"}\n")
+
 
     let client = ClientBuilder::default()
         .credential(&username, &password)
@@ -67,13 +64,10 @@ pub async fn start_superchain_indexer(
     info!("Superchain ws client created. Trying to connect");
 
     let request = GetSparkOrderRequest {
-        from_block: Bound::FromLatest(3),
+        from_block: Bound::FromLatest(1000),
         to_block: Bound::None,
-        order_type__in: h_s_state_types,
         ..Default::default()
     };
-
-    info!("Superchain ws request: {:?}", request);
 
     let stream = client
         .get_fuel_spark_orders_by_format(request, Format::JsonStream, false)
@@ -81,40 +75,17 @@ pub async fn start_superchain_indexer(
         .expect("Failed to get fuel spark orders");
     superchain_client::futures::pin_mut!(stream);
 
-    let received_orders: Arc<Mutex<HashMap<String, ReceivedOrder>>> =
-        Arc::new(Mutex::new(HashMap::new()));
-
-    let client_clone = ClientBuilder::default()
-        .credential(username.clone(), password.clone())
-        .endpoint("fuel.beta.superchain.network")
-        .build::<WsProvider>()
-        .await?;
-
     while let Some(data) = stream.next().await {
-        let data = data.unwrap();
-        let data_str = String::from_utf8(data).unwrap();
-        let superchain_order: SuperchainOrder = serde_json::from_str(&data_str)?;
-        let order_id = &superchain_order.order_id.clone();
-        let b_num = superchain_order.block_number.clone();
-
-        let receive_time = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_secs();
-
-        {
-            let mut orders = received_orders.lock().await;
-            orders.insert(
-                superchain_order.order_id.clone(),
-                ReceivedOrder {
-                    order: superchain_order,
-                    receive_time,
-                },
-            );
+        match data {
+            Ok(valid_data) => {
+                let data_str = String::from_utf8(valid_data).unwrap();
+                let superchain_order: SuperchainOrder = serde_json::from_str(&data_str)?;
+                info!("superchain order {:?}", superchain_order);
+            }
+            Err(e) => {
+                error!("Error {:?}", e);
+            }
         }
-
-        info!("Order ID: {:?} received at UNIX time: {}", order_id, receive_time);
-
     }
 
     Ok(())

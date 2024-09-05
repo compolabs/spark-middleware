@@ -22,14 +22,15 @@ impl OrderManager {
             OrderType::Buy => self.buy_orders.write().await,
             OrderType::Sell => self.sell_orders.write().await,
         };
-        println!("adding order {:?}", &order);
 
         let orders = order_map.entry(order.price).or_default();
 
         if let Some(existing_order) = orders.iter_mut().find(|o| o.id == order.id) {
             *existing_order = order;
+            info!("Updated existing order: {:?}", existing_order);
         } else {
-            orders.push(order);
+            orders.push(order.clone());
+            info!("Added new order: {:?}", order);
         }
     }
 

@@ -55,6 +55,7 @@ pub struct SpotOrderEnvio {
 }
 
 #[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct SubsquidOrder {
     pub id: String,
     pub asset: String,
