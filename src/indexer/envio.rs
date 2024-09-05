@@ -7,7 +7,7 @@ use tokio_tungstenite::{
 use url::Url;
 
 use crate::{
-    error::Error, indexer::spot_order::{OrderType, SpotOrder, WebSocketResponseEnvio}, subscription::envio::format_graphql_subscription
+    error::Error, indexer::spot_order::{OrderType, SpotOrder, WebSocketResponseEnvio}, middleware::manager::OrderManagerMessage, subscription::envio::format_graphql_subscription
 };
 
 pub struct WebSocketClientEnvio {
@@ -21,7 +21,7 @@ impl WebSocketClientEnvio {
 
     pub async fn connect(
         &self,
-        sender: mpsc::Sender<SpotOrder>,
+        sender: mpsc::Sender<OrderManagerMessage>,
     ) -> Result<(), Error> {
         loop {
             let mut initialized = false;
@@ -71,14 +71,14 @@ impl WebSocketClientEnvio {
                                             for order_indexer in orders {
                                                 let spot_order =
                                                     SpotOrder::from_indexer_envio(order_indexer)?;
-                                                sender.send(spot_order).await?;
+                                                sender.send(OrderManagerMessage::AddOrder(spot_order)).await?;
                                             }
                                         }
                                         if let Some(orders) = payload.data.active_sell_order {
                                             for order_indexer in orders {
                                                 let spot_order =
                                                     SpotOrder::from_indexer_envio(order_indexer)?;
-                                                sender.send(spot_order).await?;
+                                                sender.send(OrderManagerMessage::AddOrder(spot_order)).await?;
                                             }
                                         }
                                         last_data_time = Instant::now();

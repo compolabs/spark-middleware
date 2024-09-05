@@ -3,7 +3,8 @@ use error::Error;
 use futures_util::future::{join_all, select};
 use futures_util::future::FutureExt;
 use indexer::{envio::WebSocketClientEnvio, subsquid::WebSocketClientSubsquid, superchain::start_superchain_indexer};
-use middleware::manager::OrderManager;
+use middleware::aggregator::Aggregator;
+use middleware::manager::{OrderManager, OrderManagerMessage};
 use std::{collections::HashMap, sync::Arc};
 use tokio::{signal, sync::mpsc};
 use url::Url;
@@ -41,8 +42,8 @@ async fn main() -> Result<(), Error> {
         order_managers.insert("envio".to_string(), order_manager_envio.clone());
 
         let manager_task_envio = tokio::spawn(async move {
-            while let Some(order) = rx.recv().await {
-                order_manager_envio.add_order(order).await;
+            while let Some(message) = rx.recv().await {
+                order_manager_envio.handle_message(message).await;
             }
         });
 
@@ -65,8 +66,8 @@ async fn main() -> Result<(), Error> {
         order_managers.insert("subsquid".to_string(), order_manager_subsquid.clone());
 
         let manager_task_subsquid = tokio::spawn(async move {
-            while let Some(order) = rx.recv().await {
-                order_manager_subsquid.add_order(order).await;
+            while let Some(message) = rx.recv().await {
+                order_manager_subsquid.handle_message(message).await;
             }
         });
 
@@ -74,12 +75,11 @@ async fn main() -> Result<(), Error> {
         tasks.push(manager_task_subsquid);
     }
 
-    // Подключение к индексатору Superchain
     if settings.settings.active_indexers.contains(&"superchain".to_string()) {
         let (tx_superchain, mut rx_superchain) = mpsc::channel(101);
-
+        let settings_clone = settings.clone();
         let ws_task_superchain = tokio::spawn(async move {
-            if let Err(e) = start_superchain_indexer(tx_superchain, settings).await {
+            if let Err(e) = start_superchain_indexer(tx_superchain, settings_clone).await {
                 eprintln!("Superchain error: {}", e);
             }
         });
@@ -88,8 +88,8 @@ async fn main() -> Result<(), Error> {
         order_managers.insert("superchain".to_string(), order_manager_superchain.clone());
 
         let manager_task_superchain = tokio::spawn(async move {
-            while let Some(order) = rx_superchain.recv().await {
-                order_manager_superchain.add_order(order).await;
+            while let Some(message) = rx_superchain.recv().await {
+                order_manager_superchain.handle_message(message).await;
             }
         });
 
@@ -97,8 +97,10 @@ async fn main() -> Result<(), Error> {
         tasks.push(manager_task_superchain);
     }
 
+    let aggregator = Aggregator::new(order_managers.clone(), settings.settings.active_indexers.clone());
+
     let rocket_task = tokio::spawn(async move {
-        let rocket = rocket(order_managers.clone());  
+        let rocket = rocket(order_managers.clone(), aggregator.clone());  
         let _ = rocket.launch().await;
     });
 

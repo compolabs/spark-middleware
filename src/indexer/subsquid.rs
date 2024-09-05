@@ -6,6 +6,7 @@ use tokio::net::TcpStream;
 use tokio::sync::mpsc;
 use url::Url;
 use crate::indexer::spot_order::OrderType;
+use crate::middleware::manager::OrderManagerMessage;
 use crate::{error::Error, indexer::spot_order::{SpotOrder, SubsquidOrder}, subscription::subsquid::format_graphql_subscription};
 
 pub struct WebSocketClientSubsquid {
@@ -19,7 +20,7 @@ impl WebSocketClientSubsquid {
 
     pub async fn connect(
         &self,
-        sender: mpsc::Sender<SpotOrder>,
+        sender: mpsc::Sender<OrderManagerMessage>,
     ) -> Result<(), Error> {
         loop {
             let mut ws_stream = match self.connect_to_ws().await {
@@ -56,20 +57,15 @@ impl WebSocketClientSubsquid {
 
                         if text.contains("\"type\":\"next\"") {
 
-                            info!("======= nice");
                             if let Ok(response) = serde_json::from_str::<serde_json::Value>(&text) {
-                                info!("======= nice2");
-                                info!("response {:?}", response);
-                                info!("======= nice2");
                                 if let Some(orders) = response["payload"]["data"]["activeBuyOrders"].as_array() {
-                                    info!("======= nice buy 3");
                                     for order in orders {
-                                        info!("======= nice buy 4 {:?}", order);
                                         let subsquid_order: SubsquidOrder = serde_json::from_value(order.clone()).unwrap();
                                         match SpotOrder::from_indexer_subsquid(subsquid_order) {
                                             Ok(spot_order) => {
                                                 info!("Sending Buy Order to manager: {:?}", spot_order);
-                                                if let Err(e) = sender.send(spot_order).await {
+                                                let mananger_message = OrderManagerMessage::AddOrder(spot_order);
+                                                if let Err(e) = sender.send(mananger_message).await {
                                                     error!("Failed to send order to manager: {:?}", e);
                                                 }
                                             }
@@ -78,14 +74,13 @@ impl WebSocketClientSubsquid {
                                     }
                                 }
                                 if let Some(orders) = response["payload"]["data"]["activeSellOrders"].as_array() {
-                                    info!("======= nice sell 3");
                                     for order in orders {
-                                        info!("======= nice sell 4 {:?}", order);
                                         let subsquid_order: SubsquidOrder = serde_json::from_value(order.clone()).unwrap();
                                         match SpotOrder::from_indexer_subsquid(subsquid_order) {
                                             Ok(spot_order) => {
                                                 info!("Sending Sell Order to manager: {:?}", spot_order);
-                                                if let Err(e) = sender.send(spot_order).await {
+                                                let mananger_message = OrderManagerMessage::AddOrder(spot_order);
+                                                if let Err(e) = sender.send(mananger_message).await {
                                                     error!("Failed to send order to manager: {:?}", e);
                                                 }
                                             }
