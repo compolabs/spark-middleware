@@ -13,6 +13,7 @@ use web::server::rocket;
 pub mod config;
 pub mod error;
 pub mod indexer;
+pub mod matchers;
 pub mod middleware;
 pub mod subscription;
 pub mod web;

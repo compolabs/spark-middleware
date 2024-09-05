@@ -6,6 +6,7 @@ pub struct Settings {
     pub settings: IndexerSettings,
     pub websockets: WebSocketSettings,
     pub contract: ContractSettings,
+    pub matchers: MatchersSettings,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -25,6 +26,11 @@ pub struct WebSocketSettings {
 pub struct ContractSettings {
     pub contract_id: String,
     pub order_limit: i32,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct MatchersSettings{
+    pub matchers: Vec<String>,
 }
 
 impl Settings {
