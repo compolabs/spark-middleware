@@ -1,13 +1,22 @@
-
 use futures_util::{SinkExt, StreamExt};
 use log::{info, error};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc;
 use tokio_tungstenite::{tungstenite::protocol::Message, WebSocketStream};
 use std::sync::Arc;
 use tokio::net::TcpStream;
 use tokio_tungstenite::MaybeTlsStream;
-use crate::config::settings::Settings;
+use crate::{config::settings::Settings, indexer::spot_order::{OrderType, SpotOrder}, middleware::aggregator::Aggregator};
+
+#[derive(Serialize, Deserialize)]
+pub enum MatcherRequest {
+    Orders(Vec<SpotOrder>), 
+}
+
+#[derive(Serialize, Deserialize)]
+pub enum MatcherResponse {
+    MatchResult { success: bool, matched_orders: Vec<String> }, 
+}
 
 #[derive(Deserialize)]
 struct MatcherConnectRequest {
@@ -25,30 +34,28 @@ impl MatcherWebSocket {
 
     pub async fn handle_connection(
         &self,
-        mut ws_stream: WebSocketStream<TcpStream>,
-        sender: mpsc::Sender<String>,  
+        ws_stream: WebSocketStream<TcpStream>,
+        sender: mpsc::Sender<String>,
+        aggregator: Arc<Aggregator>,
     ) {
+        let mut ws_stream = ws_stream; 
+
         if let Some(message) = ws_stream.next().await {
             match message {
                 Ok(Message::Text(text)) => {
-                    match serde_json::from_str::<MatcherConnectRequest>(&text) {
-                        Ok(connect_request) => {
-                            if self.is_matcher_allowed(&connect_request.uuid) {
-                                info!("Matcher with UUID {} connected", connect_request.uuid);
-                                self.process_matcher(ws_stream, sender).await;
-                            } else {
-                                error!("Matcher with UUID {} is not allowed", connect_request.uuid);
-                                let _ = ws_stream
-                                    .send(Message::Text("Unauthorized".to_string()))
-                                    .await;
-                                let _ = ws_stream.close(None).await;
+                    if let Ok(MatcherConnectRequest { uuid }) = serde_json::from_str(&text) {
+                        if self.is_matcher_allowed(&uuid) {
+                            info!("Matcher with UUID {} connected", uuid);
+
+                            let aggregated_orders = aggregator.get_all_aggregated_orders().await;
+                            if let Err(e) = self.send_orders_to_matcher(&mut ws_stream, aggregated_orders).await {
+                                error!("Failed to send orders to matcher: {}", e);
+                                return;
                             }
-                        }
-                        Err(e) => {
-                            error!("Failed to parse MatcherConnectRequest: {:?}, raw message: {}", e, text);
-                            let _ = ws_stream
-                                .send(Message::Text("Invalid request format".to_string()))
-                                .await;
+
+                            if let Some(response) = self.receive_matcher_response(&mut ws_stream).await {
+                                aggregator.process_matcher_response(response).await;
+                            }
                         }
                     }
                 }
@@ -83,6 +90,37 @@ impl MatcherWebSocket {
                 _ => {}
             }
         }
+    }
+
+    pub async fn send_orders_to_matcher(
+        &self,
+        ws_stream: &mut WebSocketStream<TcpStream>,
+        orders: Vec<SpotOrder>,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let request = MatcherRequest::Orders(orders);
+        let request_text = serde_json::to_string(&request)?;
+        
+        ws_stream.send(Message::Text(request_text)).await?;
+        Ok(())
+    }
+
+    pub async fn receive_matcher_response(
+        &self,
+        ws_stream: &mut WebSocketStream<TcpStream>,
+    ) -> Option<MatcherResponse> {
+        while let Some(message) = ws_stream.next().await {
+            match message {
+                Ok(Message::Text(text)) => {
+                    if let Ok(response) = serde_json::from_str::<MatcherResponse>(&text) {
+                        return Some(response);
+                    }
+                }
+                _ => {
+                    error!("Received unexpected message from matcher.");
+                }
+            }
+        }
+        None
     }
 }
 

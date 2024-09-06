@@ -46,10 +46,10 @@ async fn main() -> Result<(), Error> {
 
     let aggregator = Aggregator::new(order_managers.clone(), settings.settings.active_indexers.clone());
 
-    let rocket_task = tokio::spawn(run_rocket_server(order_managers.clone(), aggregator));
+    let rocket_task = tokio::spawn(run_rocket_server(order_managers.clone(), Arc::clone(&aggregator)));
     tasks.push(rocket_task);
 
-    let matcher_task = tokio::spawn(run_matcher_server(settings.clone()));
+    let matcher_task = tokio::spawn(run_matcher_server(settings.clone(), aggregator));
     tasks.push(matcher_task);
 
     let ctrl_c_task = tokio::spawn(async {
@@ -165,9 +165,14 @@ async fn run_rocket_server(
 }
 
 
-async fn run_matcher_server(settings: Arc<Settings>) {
-    let listener = TcpListener::bind(&settings.matchers.matcher_ws_url).await.unwrap(); //NTD unwrap
-    let matcher_websocket = Arc::new(MatcherWebSocket::new(settings.clone())); 
+async fn run_matcher_server(
+    settings: Arc<Settings>,
+    aggregator: Arc<Aggregator>,
+) {
+    let listener = TcpListener::bind(&settings.matchers.matcher_ws_url)
+        .await
+        .unwrap(); // NTD unwrap
+    let matcher_websocket = Arc::new(MatcherWebSocket::new(settings.clone()));
 
     info!("Matcher WebSocket server started at {}", &settings.matchers.matcher_ws_url);
 
@@ -176,10 +181,14 @@ async fn run_matcher_server(settings: Arc<Settings>) {
             .await
             .expect("Error during WebSocket handshake");
 
-        let matcher_websocket = Arc::clone(&matcher_websocket); 
+        let matcher_websocket = Arc::clone(&matcher_websocket);
+        let aggregator_clone = Arc::clone(&aggregator); 
+
         let (tx, rx) = mpsc::channel(100);
         tokio::spawn(async move {
-            matcher_websocket.handle_connection(ws_stream, tx).await;
+            matcher_websocket
+                .handle_connection(ws_stream, tx, aggregator_clone) 
+                .await;
         });
     }
 }
