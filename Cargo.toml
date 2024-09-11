@@ -22,7 +22,7 @@ rocket_okapi = { version = "0.8.0-rc.2", features = ["swagger", "rapidoc"] }
 schemars = "0.8.0"
 serde = { version = "1.0.198", features = ["derive"] }
 serde_json = "1.0.116"
-spark-market-sdk = "0.2.1"
+spark-market-sdk = { git = "https://github.com/compolabs/orderbook-contract.git", branch = "release-0.3.0-fuel-rs-0.65.1", package = "spark-market-sdk" }
 superchain_client = { path = "../superchain_client"}
 thiserror = "1.0.63"
 tokio = { version = "1.12", features = ["rt", "macros", "time"] }

@@ -5,7 +5,6 @@ use tokio::sync::mpsc;
 use tokio_tungstenite::{tungstenite::protocol::Message, WebSocketStream};
 use std::sync::Arc;
 use tokio::net::TcpStream;
-use tokio_tungstenite::MaybeTlsStream;
 use crate::{config::settings::Settings, indexer::spot_order::{OrderType, SpotOrder}, middleware::aggregator::Aggregator};
 
 #[derive(Serialize, Deserialize)]
@@ -34,12 +33,10 @@ impl MatcherWebSocket {
 
     pub async fn handle_connection(
         &self,
-        ws_stream: WebSocketStream<TcpStream>,
+        mut ws_stream: WebSocketStream<TcpStream>,
         sender: mpsc::Sender<String>,
         aggregator: Arc<Aggregator>,
     ) {
-        let mut ws_stream = ws_stream; 
-
         if let Some(message) = ws_stream.next().await {
             match message {
                 Ok(Message::Text(text)) => {
@@ -47,15 +44,17 @@ impl MatcherWebSocket {
                         if self.is_matcher_allowed(&uuid) {
                             info!("Matcher with UUID {} connected", uuid);
 
-                            let aggregated_orders = aggregator.get_all_aggregated_orders().await;
-                            if let Err(e) = self.send_orders_to_matcher(&mut ws_stream, aggregated_orders).await {
-                                error!("Failed to send orders to matcher: {}", e);
+                            // Теперь мы вызываем функцию select_matching_batches для получения подходящих батчей
+                            let matching_batches = aggregator.select_matching_batches(20).await;
+
+                            if matching_batches.is_empty() {
+                                info!("No matching orders found.");
+                                let _ = sender.send("No matching orders found.".to_string()).await;
                                 return;
                             }
 
-                            if let Some(response) = self.receive_matcher_response(&mut ws_stream).await {
-                                aggregator.process_matcher_response(response).await;
-                            }
+                            // Передаем батчи по очереди
+                            self.process_batches(matching_batches, &mut ws_stream, sender, aggregator).await;
                         }
                     }
                 }
@@ -66,42 +65,66 @@ impl MatcherWebSocket {
         }
     }
 
-    fn is_matcher_allowed(&self, uuid: &str) -> bool {
-        self.settings.matchers.matchers.contains(&uuid.to_string())
-    }
-
-    async fn process_matcher(
+    async fn process_batches(
         &self,
-        mut ws_stream: WebSocketStream<TcpStream>,
-        sender: mpsc::Sender<String>,  
+        batches: Vec<Vec<(SpotOrder, SpotOrder)>>,  // Теперь это пары ордеров для матча
+        ws_stream: &mut WebSocketStream<TcpStream>,
+        sender: mpsc::Sender<String>,
+        aggregator: Arc<Aggregator>,
     ) {
-        while let Some(message) = ws_stream.next().await {
-            match message {
-                Ok(Message::Text(text)) => {
-                    info!("Received message from matcher: {}", text);
-                    if let Err(e) = sender.send(text).await {
-                        error!("Failed to send message to handler: {:?}", e);
-                    }
-                }
-                Err(e) => {
-                    error!("Error receiving message: {:?}", e);
-                    break;
-                }
-                _ => {}
+        for batch in batches {
+            // Преобразуем пары ордеров в список для отправки матчеру
+            let flat_batch: Vec<SpotOrder> = batch
+                .into_iter()
+                .flat_map(|(buy_order, sell_order)| vec![buy_order, sell_order])
+                .collect();
+
+            if let Err(e) = self.send_batch_to_matcher(ws_stream, flat_batch).await {
+                error!("Failed to send batch to matcher: {}", e);
+                //let _ = sender.send(format!("Failed to send batch: {}", e)).await;
+                return;
+            }
+
+            if let Some(response) = self.receive_matcher_response(ws_stream).await {
+                self.process_matcher_response(response, &aggregator, sender.clone()).await;
+            } else {
+                error!("No response from matcher");
+                break;
             }
         }
     }
 
-    pub async fn send_orders_to_matcher(
+    async fn send_batch_to_matcher(
         &self,
         ws_stream: &mut WebSocketStream<TcpStream>,
-        orders: Vec<SpotOrder>,
+        batch: Vec<SpotOrder>,
     ) -> Result<(), Box<dyn std::error::Error>> {
-        let request = MatcherRequest::Orders(orders);
+        let request = MatcherRequest::Orders(batch);
         let request_text = serde_json::to_string(&request)?;
-        
+
         ws_stream.send(Message::Text(request_text)).await?;
         Ok(())
+    }
+
+    async fn process_matcher_response(
+        &self,
+        response: MatcherResponse,
+        aggregator: &Arc<Aggregator>,
+        sender: mpsc::Sender<String>,
+    ) {
+        match response {
+            MatcherResponse::MatchResult { success, matched_orders } => {
+                if success {
+                    info!("Matcher successfully processed orders: {:?}", matched_orders);
+                    let _ = sender.send("Matcher successfully processed orders".to_string()).await;
+
+                    aggregator.remove_matched_orders(matched_orders).await;
+                } else {
+                    error!("Matcher failed to process orders");
+//                    let _ = sender.send("Matcher failed to process orders".to_string()).await;
+                }
+            }
+        }
     }
 
     pub async fn receive_matcher_response(
@@ -121,6 +144,10 @@ impl MatcherWebSocket {
             }
         }
         None
+    }
+
+    fn is_matcher_allowed(&self, uuid: &str) -> bool {
+        self.settings.matchers.matchers.contains(&uuid.to_string())
     }
 }
 
