@@ -7,7 +7,10 @@ use tokio_tungstenite::{
 use url::Url;
 
 use crate::{
-    error::Error, indexer::spot_order::{OrderType, SpotOrder, WebSocketResponseEnvio}, middleware::manager::OrderManagerMessage, subscription::envio::format_graphql_subscription
+    error::Error,
+    indexer::spot_order::{OrderType, SpotOrder, WebSocketResponseEnvio},
+    middleware::manager::OrderManagerMessage,
+    subscription::envio::format_graphql_subscription,
 };
 
 pub struct WebSocketClientEnvio {
@@ -19,10 +22,7 @@ impl WebSocketClientEnvio {
         WebSocketClientEnvio { url }
     }
 
-    pub async fn connect(
-        &self,
-        sender: mpsc::Sender<OrderManagerMessage>,
-    ) -> Result<(), Error> {
+    pub async fn connect(&self, sender: mpsc::Sender<OrderManagerMessage>) -> Result<(), Error> {
         loop {
             let mut initialized = false;
             let mut ws_stream = match self.connect_to_ws().await {
@@ -42,13 +42,16 @@ impl WebSocketClientEnvio {
 
             let mut last_data_time = Instant::now();
             while let Some(message) = ws_stream.next().await {
-                if Instant::now().duration_since(last_data_time) > tokio::time::Duration::from_secs(60) {
+                if Instant::now().duration_since(last_data_time)
+                    > tokio::time::Duration::from_secs(60)
+                {
                     error!("No data messages received for the last 60 seconds, reconnecting...");
                     break;
                 }
                 match message {
                     Ok(Message::Text(text)) => {
-                        if let Ok(response) = serde_json::from_str::<WebSocketResponseEnvio>(&text) {
+                        if let Ok(response) = serde_json::from_str::<WebSocketResponseEnvio>(&text)
+                        {
                             match response.r#type.as_str() {
                                 "ka" => {
                                     info!("Received keep-alive message.");
@@ -71,14 +74,20 @@ impl WebSocketClientEnvio {
                                             for order_indexer in orders {
                                                 let spot_order =
                                                     SpotOrder::from_indexer_envio(order_indexer)?;
-                                                sender.send(OrderManagerMessage::AddOrder(spot_order)).await?;
+                                                sender
+                                                    .send(OrderManagerMessage::AddOrder(spot_order))
+                                                    .await
+                                                    .map_err(|_| Error::OrderManagerSendError)?;
                                             }
                                         }
                                         if let Some(orders) = payload.data.active_sell_order {
                                             for order_indexer in orders {
                                                 let spot_order =
                                                     SpotOrder::from_indexer_envio(order_indexer)?;
-                                                sender.send(OrderManagerMessage::AddOrder(spot_order)).await?;
+                                                sender
+                                                    .send(OrderManagerMessage::AddOrder(spot_order))
+                                                    .await
+                                                    .map_err(|_| Error::OrderManagerSendError)?;
                                             }
                                         }
                                         last_data_time = Instant::now();
@@ -98,8 +107,10 @@ impl WebSocketClientEnvio {
                 }
             }
 
-            self.unsubscribe_orders(&mut ws_stream, OrderType::Buy).await?;
-            self.unsubscribe_orders(&mut ws_stream, OrderType::Sell).await?;
+            self.unsubscribe_orders(&mut ws_stream, OrderType::Buy)
+                .await?;
+            self.unsubscribe_orders(&mut ws_stream, OrderType::Sell)
+                .await?;
         }
     }
 

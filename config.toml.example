@@ -11,3 +11,6 @@ superchain_pass = "pass"
 [contract]
 contract_id = "0x58959d086d8a6ee8cf8eeb572b111edb21661266be4b4885383748d11b72d0aa"
 order_limit = 50
+
+[server]
+server_port = 9090

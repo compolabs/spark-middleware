@@ -1,7 +1,5 @@
 use thiserror::Error;
 
-use crate::{indexer::spot_order::SpotOrder, middleware::manager::OrderManagerMessage};
-
 #[derive(Error, Debug)]
 pub enum Error {
     #[error("Fuel error: {0}")]
@@ -41,10 +39,10 @@ pub enum Error {
     SerdeJsonError(#[from] serde_json::Error),
 
     #[error("Tokio mpsc spot order error {0}")]
-    TokioMpscOrderError(#[from] tokio::sync::mpsc::error::SendError<SpotOrder>),
+    TokioMpscOrderError(#[from] tokio::sync::mpsc::error::SendError<String>),
 
-    #[error("Tokio mpsc manager message error {0}")]
-    TokioMpscManagerMessageError(#[from] tokio::sync::mpsc::error::SendError<OrderManagerMessage>),
+    #[error("Failed to send OrderManagerMessage")]
+    OrderManagerSendError,
 
     #[error("Tokio tungstenite error {0}")]
     TokioTungsteniteError(#[from] tokio_tungstenite::tungstenite::Error),

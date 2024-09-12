@@ -12,7 +12,7 @@ pub enum OrderManagerMessage {
         price: u128,
         order_type: OrderType,
     },
-    ClearAndAddOrders(Vec<SpotOrder>), 
+    ClearAndAddOrders(Vec<SpotOrder>),
 }
 
 pub struct OrderManager {
@@ -31,9 +31,11 @@ impl OrderManager {
     pub async fn handle_message(&self, message: OrderManagerMessage) {
         match message {
             OrderManagerMessage::AddOrder(order) => self.add_order(order).await,
-            OrderManagerMessage::RemoveOrder { order_id, price, order_type } => {
-                self.remove_order(&order_id, price, order_type).await
-            }
+            OrderManagerMessage::RemoveOrder {
+                order_id,
+                price,
+                order_type,
+            } => self.remove_order(&order_id, price, order_type).await,
             OrderManagerMessage::ClearAndAddOrders(orders) => {
                 self.clear_and_add_orders(orders).await;
             }
@@ -76,8 +78,8 @@ impl OrderManager {
         println!("========================");
         println!("========================");
         println!("========================");
-        println!("{:?}",orders);
-        if orders.len() > 0 {
+        println!("{:?}", orders);
+        if !orders.is_empty() {
             self.clear_orders().await;
             for order in orders {
                 self.add_order(order).await;

@@ -1,15 +1,17 @@
 use config::settings::Settings;
 use error::Error;
-use futures_util::future::{join_all, select};
 use futures_util::future::FutureExt;
-use futures_util::TryFutureExt;
-use indexer::{envio::WebSocketClientEnvio, subsquid::WebSocketClientSubsquid, superchain::start_superchain_indexer};
+use futures_util::future::{join_all, select};
+use indexer::{
+    envio::WebSocketClientEnvio, subsquid::WebSocketClientSubsquid,
+    superchain::start_superchain_indexer,
+};
 use log::info;
 use matchers::websocket::MatcherWebSocket;
 use middleware::aggregator::Aggregator;
 use middleware::manager::OrderManager;
-use tokio::net::TcpListener;
 use std::{collections::HashMap, sync::Arc};
+use tokio::net::TcpListener;
 use tokio::{signal, sync::mpsc};
 use url::Url;
 use web::server::rocket;
@@ -32,21 +34,40 @@ async fn main() -> Result<(), Error> {
 
     let mut order_managers: HashMap<String, Arc<OrderManager>> = HashMap::new();
 
-    if settings.settings.active_indexers.contains(&"envio".to_string()) {
+    if settings
+        .settings
+        .active_indexers
+        .contains(&"envio".to_string())
+    {
         initialize_envio_indexer(settings.clone(), &mut tasks, &mut order_managers).await?;
     }
 
-    if settings.settings.active_indexers.contains(&"subsquid".to_string()) {
+    if settings
+        .settings
+        .active_indexers
+        .contains(&"subsquid".to_string())
+    {
         initialize_subsquid_indexer(settings.clone(), &mut tasks, &mut order_managers).await?;
     }
 
-    if settings.settings.active_indexers.contains(&"superchain".to_string()) {
+    if settings
+        .settings
+        .active_indexers
+        .contains(&"superchain".to_string())
+    {
         initialize_superchain_indexer(settings.clone(), &mut tasks, &mut order_managers).await?;
     }
 
-    let aggregator = Aggregator::new(order_managers.clone(), settings.settings.active_indexers.clone());
+    let aggregator = Aggregator::new(
+        order_managers.clone(),
+        settings.settings.active_indexers.clone(),
+    );
 
-    let rocket_task = tokio::spawn(run_rocket_server(order_managers.clone(), Arc::clone(&aggregator)));
+    let rocket_task = tokio::spawn(run_rocket_server(
+        order_managers.clone(),
+        Arc::clone(&aggregator),
+        Arc::clone(&settings),
+    ));
     tasks.push(rocket_task);
 
     let matcher_task = tokio::spawn(run_matcher_server(settings.clone(), aggregator));
@@ -62,11 +83,7 @@ async fn main() -> Result<(), Error> {
         println!("Shutting down gracefully...");
     });
 
-    select(
-        join_all(tasks).boxed(),
-        shutdown_signal.boxed(),
-    )
-    .await;
+    select(join_all(tasks).boxed(), shutdown_signal.boxed()).await;
 
     println!("Application is shutting down.");
     Ok(())
@@ -159,22 +176,22 @@ async fn initialize_superchain_indexer(
 async fn run_rocket_server(
     order_managers: HashMap<String, Arc<OrderManager>>,
     aggregator: Arc<Aggregator>,
+    settings: Arc<Settings>,
 ) {
-    let rocket = rocket(order_managers, aggregator);
+    let rocket = rocket(order_managers, aggregator, settings);
     let _ = rocket.launch().await;
 }
 
-
-async fn run_matcher_server(
-    settings: Arc<Settings>,
-    aggregator: Arc<Aggregator>,
-) {
+async fn run_matcher_server(settings: Arc<Settings>, aggregator: Arc<Aggregator>) {
     let listener = TcpListener::bind(&settings.matchers.matcher_ws_url)
         .await
         .unwrap(); // NTD unwrap
     let matcher_websocket = Arc::new(MatcherWebSocket::new(settings.clone()));
 
-    info!("Matcher WebSocket server started at {}", &settings.matchers.matcher_ws_url);
+    info!(
+        "Matcher WebSocket server started at {}",
+        &settings.matchers.matcher_ws_url
+    );
 
     while let Ok((stream, _)) = listener.accept().await {
         let ws_stream = tokio_tungstenite::accept_async(stream)
@@ -182,12 +199,12 @@ async fn run_matcher_server(
             .expect("Error during WebSocket handshake");
 
         let matcher_websocket = Arc::clone(&matcher_websocket);
-        let aggregator_clone = Arc::clone(&aggregator); 
+        let aggregator_clone = Arc::clone(&aggregator);
 
-        let (tx, rx) = mpsc::channel(100);
+        let (tx, _) = mpsc::channel(100);
         tokio::spawn(async move {
             matcher_websocket
-                .handle_connection(ws_stream, tx, aggregator_clone) 
+                .handle_connection(ws_stream, tx, aggregator_clone)
                 .await;
         });
     }

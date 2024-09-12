@@ -1,24 +1,19 @@
-use log::{info, error};
+use log::{error, info};
 use serde::Deserialize;
-use std::collections::{HashMap, HashSet};
-use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 use superchain_client::{
-    core::types::fuel::OrderChangeType,
-    futures::StreamExt,
-    provider::FuelProvider,
-    query::Bound,
-    requests::fuel::{GetFuelBlocksRequest, GetSparkOrderRequest},
-    Client, ClientBuilder, Format, WsProvider,
+    futures::StreamExt, provider::FuelProvider, query::Bound, requests::fuel::GetSparkOrderRequest,
+    ClientBuilder, Format, WsProvider,
 };
-use tokio::sync::{mpsc, Mutex};
+use tokio::sync::mpsc;
 
 use crate::config::settings::Settings;
 use crate::error::Error;
 use crate::indexer::spot_order::OrderType;
+use crate::indexer::spot_order::SpotOrder;
 use crate::middleware::manager::OrderManagerMessage;
-use crate::{config::env::ev, indexer::spot_order::SpotOrder};
 
+#[allow(dead_code)]
 #[derive(Debug, Deserialize)]
 struct SuperchainOrder {
     chain: u64,
@@ -45,7 +40,7 @@ struct SuperchainOrder {
 
 pub async fn start_superchain_indexer(
     sender: mpsc::Sender<OrderManagerMessage>,
-    config: Settings
+    config: Settings,
 ) -> Result<(), Error> {
     let username = config.websockets.superchain_username;
     let password = config.websockets.superchain_pass;
@@ -107,26 +102,34 @@ pub async fn start_superchain_indexer(
                             };
 
                             info!("Sending Open Order to manager: {:?}", spot_order);
-                            if let Err(e) = sender.send(OrderManagerMessage::AddOrder(spot_order)).await {
+                            if let Err(e) =
+                                sender.send(OrderManagerMessage::AddOrder(spot_order)).await
+                            {
                                 error!("Failed to send order to manager: {:?}", e);
                             }
                         }
                     }
                     "Match" | "Cancel" => {
                         let order_id = superchain_order.order_id.clone();
-                        let price = superchain_order.price.unwrap_or_default(); 
+                        let price = superchain_order.price.unwrap_or_default();
 
                         if let Some(order_type_str) = superchain_order.order_type.as_deref() {
                             let order_type_enum = match order_type_str {
                                 "Buy" => OrderType::Buy,
                                 "Sell" => OrderType::Sell,
                                 _ => {
-                                    error!("Unknown order type for removing order: {:?}", order_type_str);
+                                    error!(
+                                        "Unknown order type for removing order: {:?}",
+                                        order_type_str
+                                    );
                                     continue;
                                 }
                             };
 
-                            info!("Removing Order from manager: {:?}, with order_type: {:?}", order_id, order_type_enum);
+                            info!(
+                                "Removing Order from manager: {:?}, with order_type: {:?}",
+                                order_id, order_type_enum
+                            );
 
                             let remove_message = OrderManagerMessage::RemoveOrder {
                                 order_id,
@@ -138,7 +141,10 @@ pub async fn start_superchain_indexer(
                                 error!("Failed to send remove order message to manager: {:?}", e);
                             }
                         } else {
-                            info!("Removing Order from manager without known order_type: {:?}", order_id);
+                            info!(
+                                "Removing Order from manager without known order_type: {:?}",
+                                order_id
+                            );
 
                             let remove_buy_message = OrderManagerMessage::RemoveOrder {
                                 order_id: order_id.clone(),
@@ -153,11 +159,17 @@ pub async fn start_superchain_indexer(
                             };
 
                             if let Err(e) = sender.send(remove_buy_message).await {
-                                error!("Failed to send remove buy order message to manager: {:?}", e);
+                                error!(
+                                    "Failed to send remove buy order message to manager: {:?}",
+                                    e
+                                );
                             }
 
                             if let Err(e) = sender.send(remove_sell_message).await {
-                                error!("Failed to send remove sell order message to manager: {:?}", e);
+                                error!(
+                                    "Failed to send remove sell order message to manager: {:?}",
+                                    e
+                                );
                             }
                         }
                     }

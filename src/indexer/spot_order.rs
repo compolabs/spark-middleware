@@ -62,16 +62,14 @@ pub struct SubsquidOrder {
     pub amount: String,
     pub price: String,
     pub timestamp: String,
-    pub order_type: String, 
+    pub order_type: String,
     pub user: String,
     pub status: String,
     pub initial_amount: String,
 }
 
 impl SpotOrder {
-    pub fn from_indexer_envio(
-        intermediate: SpotOrderEnvio,
-    ) -> Result<Self, Error> {
+    pub fn from_indexer_envio(intermediate: SpotOrderEnvio) -> Result<Self, Error> {
         let amount = intermediate.amount.parse::<u128>()?;
         let price = intermediate.price.parse::<u128>()?;
         let timestamp =
@@ -117,7 +115,6 @@ pub struct OrderPayloadSubsquid {
     pub active_sell_orders: Option<Vec<SubsquidOrder>>,
 }
 
-
 #[derive(Debug, Clone, Deserialize)]
 pub struct OrderPayloadEnvio {
     #[serde(rename = "ActiveBuyOrder")]
@@ -126,8 +123,6 @@ pub struct OrderPayloadEnvio {
     #[serde(rename = "ActiveSellOrder")]
     pub active_sell_order: Option<Vec<SpotOrderEnvio>>,
 }
-
-
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct DataPayloadEnvio {

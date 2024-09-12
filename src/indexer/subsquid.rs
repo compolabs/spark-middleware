@@ -1,3 +1,10 @@
+use crate::indexer::spot_order::OrderType;
+use crate::middleware::manager::OrderManagerMessage;
+use crate::{
+    error::Error,
+    indexer::spot_order::{SpotOrder, SubsquidOrder},
+    subscription::subsquid::format_graphql_subscription,
+};
 use async_tungstenite::tokio::{connect_async, TokioAdapter};
 use async_tungstenite::tungstenite::protocol::Message;
 use futures_util::{SinkExt, StreamExt};
@@ -5,9 +12,6 @@ use log::{error, info};
 use tokio::net::TcpStream;
 use tokio::sync::mpsc;
 use url::Url;
-use crate::indexer::spot_order::OrderType;
-use crate::middleware::manager::OrderManagerMessage;
-use crate::{error::Error, indexer::spot_order::{SpotOrder, SubsquidOrder}, subscription::subsquid::format_graphql_subscription};
 
 pub struct WebSocketClientSubsquid {
     pub url: Url,
@@ -18,10 +22,7 @@ impl WebSocketClientSubsquid {
         WebSocketClientSubsquid { url }
     }
 
-    pub async fn connect(
-        &self,
-        sender: mpsc::Sender<OrderManagerMessage>,
-    ) -> Result<(), Error> {
+    pub async fn connect(&self, sender: mpsc::Sender<OrderManagerMessage>) -> Result<(), Error> {
         loop {
             let mut ws_stream = match self.connect_to_ws().await {
                 Ok(ws_stream) => ws_stream,
@@ -34,58 +35,76 @@ impl WebSocketClientSubsquid {
             info!("WebSocket connected to Subsquid");
 
             ws_stream
-                .send(Message::Text(r#"{"type": "connection_init", "payload": {}}"#.into()))
+                .send(Message::Text(
+                    r#"{"type": "connection_init", "payload": {}}"#.into(),
+                ))
                 .await
                 .expect("Failed to send init message");
 
             info!("Connection init message sent, waiting for connection_ack...");
 
-            let mut initialized = false;
-
             while let Some(message) = ws_stream.next().await {
                 match message {
                     Ok(Message::Text(text)) => {
-
                         if text.contains("\"type\":\"connection_ack\"") {
-                            initialized = true;
                             info!("Connection established, subscribing to orders...");
 
-                            // Подписка на buy и sell ордера
-                            self.subscribe_to_orders(OrderType::Buy, &mut ws_stream).await?;
-                            self.subscribe_to_orders(OrderType::Sell, &mut ws_stream).await?;
+                            self.subscribe_to_orders(OrderType::Buy, &mut ws_stream)
+                                .await?;
+                            self.subscribe_to_orders(OrderType::Sell, &mut ws_stream)
+                                .await?;
                         }
 
                         if text.contains("\"type\":\"next\"") {
                             let mut orders_to_add = Vec::new();
 
                             if let Ok(response) = serde_json::from_str::<serde_json::Value>(&text) {
-                                if let Some(orders) = response["payload"]["data"]["activeBuyOrders"].as_array() {
+                                if let Some(orders) =
+                                    response["payload"]["data"]["activeBuyOrders"].as_array()
+                                {
                                     for order in orders {
-                                        let subsquid_order: SubsquidOrder = serde_json::from_value(order.clone()).unwrap();
+                                        let subsquid_order: SubsquidOrder =
+                                            serde_json::from_value(order.clone()).unwrap();
                                         match SpotOrder::from_indexer_subsquid(subsquid_order) {
                                             Ok(spot_order) => {
-                                                info!("Adding Buy Order to the list: {:?}", spot_order);
+                                                info!(
+                                                    "Adding Buy Order to the list: {:?}",
+                                                    spot_order
+                                                );
                                                 orders_to_add.push(spot_order);
                                             }
-                                            Err(e) => error!("Failed to parse Subsquid order: {:?}", e),
+                                            Err(e) => {
+                                                error!("Failed to parse Subsquid order: {:?}", e)
+                                            }
                                         }
                                     }
                                 }
-                                if let Some(orders) = response["payload"]["data"]["activeSellOrders"].as_array() {
+                                if let Some(orders) =
+                                    response["payload"]["data"]["activeSellOrders"].as_array()
+                                {
                                     for order in orders {
-                                        let subsquid_order: SubsquidOrder = serde_json::from_value(order.clone()).unwrap();
+                                        let subsquid_order: SubsquidOrder =
+                                            serde_json::from_value(order.clone()).unwrap();
                                         match SpotOrder::from_indexer_subsquid(subsquid_order) {
                                             Ok(spot_order) => {
-                                                info!("Adding Sell Order to the list: {:?}", spot_order);
+                                                info!(
+                                                    "Adding Sell Order to the list: {:?}",
+                                                    spot_order
+                                                );
                                                 orders_to_add.push(spot_order);
                                             }
-                                            Err(e) => error!("Failed to parse Subsquid order: {:?}", e),
+                                            Err(e) => {
+                                                error!("Failed to parse Subsquid order: {:?}", e)
+                                            }
                                         }
                                     }
                                 }
 
                                 if !orders_to_add.is_empty() {
-                                    sender.send(OrderManagerMessage::ClearAndAddOrders(orders_to_add)).await?;
+                                    sender
+                                        .send(OrderManagerMessage::ClearAndAddOrders(orders_to_add))
+                                        .await
+                                        .map_err(|_| Error::OrderManagerSendError)?;
                                 }
                             } else {
                                 error!("Failed to deserialize WebSocket response: {:?}", text);
@@ -94,7 +113,10 @@ impl WebSocketClientSubsquid {
                     }
                     Ok(Message::Close(frame)) => {
                         if let Some(frame) = frame {
-                            error!("WebSocket connection closed by server: code = {}, reason = {}", frame.code, frame.reason);
+                            error!(
+                                "WebSocket connection closed by server: code = {}, reason = {}",
+                                frame.code, frame.reason
+                            );
                         } else {
                             error!("WebSocket connection closed by server without a frame.");
                         }
@@ -112,7 +134,10 @@ impl WebSocketClientSubsquid {
 
     async fn connect_to_ws(
         &self,
-    ) -> Result<async_tungstenite::WebSocketStream<TokioAdapter<TcpStream>>, Box<dyn std::error::Error>> {
+    ) -> Result<
+        async_tungstenite::WebSocketStream<TokioAdapter<TcpStream>>,
+        Box<dyn std::error::Error>,
+    > {
         let url = self.url.to_string();
 
         let request = async_tungstenite::tungstenite::handshake::client::Request::builder()

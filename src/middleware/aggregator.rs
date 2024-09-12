@@ -1,21 +1,23 @@
+use crate::indexer::spot_order::OrderType;
+use crate::indexer::spot_order::SpotOrder;
+use crate::middleware::manager::OrderManager;
+use log::info;
+use std::cmp::Ordering;
 use std::cmp::Reverse;
 use std::collections::BinaryHeap;
 use std::collections::HashMap;
 use std::sync::Arc;
-use tokio::sync::RwLock;
-use crate::matchers::websocket::MatcherResponse;
-use crate::middleware::manager::OrderManager;
-use crate::indexer::spot_order::SpotOrder;
-use crate::indexer::spot_order::OrderType;
-use log::info;
 
 pub struct Aggregator {
     pub order_managers: HashMap<String, Arc<OrderManager>>,
-    pub active_indexers: Vec<String>, 
+    pub active_indexers: Vec<String>,
 }
 
 impl Aggregator {
-    pub fn new(order_managers: HashMap<String, Arc<OrderManager>>, active_indexers: Vec<String>) -> Arc<Self> {
+    pub fn new(
+        order_managers: HashMap<String, Arc<OrderManager>>,
+        active_indexers: Vec<String>,
+    ) -> Arc<Self> {
         Arc::new(Self {
             order_managers,
             active_indexers,
@@ -26,7 +28,6 @@ impl Aggregator {
         if self.active_indexers.len() > 2 {
             self.get_orders_with_consensus(order_type).await
         } else {
-          
             self.get_all_orders(order_type).await
         }
     }
@@ -34,7 +35,6 @@ impl Aggregator {
     pub async fn get_all_aggregated_orders(&self) -> Vec<SpotOrder> {
         self.get_all_orders_without_type().await
     }
-
 
     async fn get_orders_with_consensus(&self, order_type: OrderType) -> Vec<SpotOrder> {
         let mut order_counts: HashMap<String, u8> = HashMap::new();
@@ -93,7 +93,7 @@ impl Aggregator {
         aggregated_orders
     }
 
-    async fn get_all_orders_without_type_tuple(&self) -> (Vec<SpotOrder>,Vec<SpotOrder>){
+    async fn get_all_orders_without_type_tuple(&self) -> (Vec<SpotOrder>, Vec<SpotOrder>) {
         let mut aggregated_buy_orders = vec![];
         let mut aggregated_sell_orders = vec![];
 
@@ -117,19 +117,6 @@ impl Aggregator {
         }
     }
 
-    pub async fn process_matcher_response(
-        &self,
-        response: MatcherResponse,
-    ) {
-        if let MatcherResponse::MatchResult { success, matched_orders } = response {
-            if success {
-                self.remove_matched_orders(matched_orders).await;
-            } else {
-                info!("Matcher was unable to match the orders.");
-            }
-        }
-    }
-
     pub async fn remove_matched_orders(&self, matched_order_ids: Vec<String>) {
         for manager in self.order_managers.values() {
             let mut buy_orders = manager.buy_orders.write().await;
@@ -147,50 +134,12 @@ impl Aggregator {
         }
         info!("Matched orders removed from the collections.");
     }
-    
+
     pub async fn select_matching_orders(&self) -> Vec<(SpotOrder, SpotOrder)> {
         let mut buy_queue = BinaryHeap::new();
         let mut sell_queue = BinaryHeap::new();
 
         {
-            let (buy_orders, sell_orders) = self.get_all_orders_without_type_tuple().await;
-            for order in buy_orders {
-                buy_queue.push(order.clone()); 
-            }
-            for order in sell_orders {
-                sell_queue.push(Reverse(order.clone())); 
-            }
-        }
-
-        let mut matches = Vec::new();
-
-        while let (Some(mut buy_order), Some(Reverse(mut sell_order))) = (buy_queue.pop(), sell_queue.pop()) {
-            if buy_order.price >= sell_order.price {
-                matches.push((buy_order.clone(), sell_order.clone()));
-
-                if buy_order.amount > sell_order.amount {
-                    buy_order.amount -= sell_order.amount;
-                    buy_queue.push(buy_order);
-                } else if sell_order.amount > buy_order.amount {
-                    sell_order.amount -= buy_order.amount;
-                    sell_queue.push(Reverse(sell_order));
-                }
-            } else {
-                
-                sell_queue.push(Reverse(sell_order));
-            }
-        }
-
-        matches
-    }
-
-
-    pub async fn select_matching_batches(&self, batch_size: usize) -> Vec<Vec<(SpotOrder, SpotOrder)>> {
-        let mut buy_queue = BinaryHeap::new();
-        let mut sell_queue = BinaryHeap::new();
-
-        {
-            // Получаем все buy и sell ордера и добавляем их в соответствующие очереди
             let (buy_orders, sell_orders) = self.get_all_orders_without_type_tuple().await;
             for order in buy_orders {
                 buy_queue.push(order.clone());
@@ -200,29 +149,78 @@ impl Aggregator {
             }
         }
 
-        let mut matches = Vec::new(); // Хранение текущего батча
-        let mut batches = Vec::new(); // Хранение всех батчей
+        let mut matches = Vec::new();
+
+        while let (Some(mut buy_order), Some(Reverse(mut sell_order))) =
+            (buy_queue.pop(), sell_queue.pop())
+        {
+            match buy_order.price.cmp(&sell_order.price) {
+                Ordering::Greater | Ordering::Equal => {
+                    matches.push((buy_order.clone(), sell_order.clone()));
+
+                    match buy_order.amount.cmp(&sell_order.amount) {
+                        Ordering::Greater => {
+                            buy_order.amount -= sell_order.amount;
+                            buy_queue.push(buy_order);
+                        }
+                        Ordering::Less => {
+                            sell_order.amount -= buy_order.amount;
+                            sell_queue.push(Reverse(sell_order));
+                        }
+                        Ordering::Equal => {}
+                    }
+                }
+                Ordering::Less => {
+                    sell_queue.push(Reverse(sell_order));
+                }
+            }
+        }
+
+        matches
+    }
+
+    pub async fn select_matching_batches(
+        &self,
+        batch_size: usize,
+    ) -> Vec<Vec<(SpotOrder, SpotOrder)>> {
+        let mut buy_queue = BinaryHeap::new();
+        let mut sell_queue = BinaryHeap::new();
+
+        // Получаем все buy и sell ордера и добавляем их в соответствующие очереди
+        let (buy_orders, sell_orders) = self.get_all_orders_without_type_tuple().await;
+        buy_queue.extend(buy_orders.into_iter());
+        sell_queue.extend(sell_orders.into_iter().map(Reverse));
+
+        let mut matches = Vec::with_capacity(batch_size);
+        let mut batches = Vec::new();
 
         // Пока есть ордера в обеих очередях
-        while let (Some(mut buy_order), Some(Reverse(mut sell_order))) = (buy_queue.pop(), sell_queue.pop()) {
+        while let (Some(mut buy_order), Some(Reverse(mut sell_order))) =
+            (buy_queue.pop(), sell_queue.pop())
+        {
             // Проверяем, может ли buy ордер быть сматчен с sell ордером
             if buy_order.price >= sell_order.price {
                 // Добавляем ордера в текущий батч
                 matches.push((buy_order.clone(), sell_order.clone()));
 
                 // Обновляем количество сматченных ордеров
-                if buy_order.amount > sell_order.amount {
-                    buy_order.amount -= sell_order.amount;
-                    buy_queue.push(buy_order);
-                } else if sell_order.amount > buy_order.amount {
-                    sell_order.amount -= buy_order.amount;
-                    sell_queue.push(Reverse(sell_order));
+                match buy_order.amount.cmp(&sell_order.amount) {
+                    Ordering::Greater => {
+                        buy_order.amount -= sell_order.amount;
+                        buy_queue.push(buy_order);
+                    }
+                    Ordering::Less => {
+                        sell_order.amount -= buy_order.amount;
+                        sell_queue.push(Reverse(sell_order));
+                    }
+                    Ordering::Equal => {
+                        // Все ордера полностью сматчены, ничего не нужно делать
+                    }
                 }
 
                 // Если батч полон, добавляем его в список и начинаем новый
                 if matches.len() == batch_size {
-                    batches.push(matches);
-                    matches = Vec::new();
+                    batches.push(std::mem::take(&mut matches)); // Очищаем текущий батч без выделения новой памяти
                 }
             } else {
                 // Если нельзя сматчить, возвращаем sell ордер обратно в очередь
@@ -230,25 +228,22 @@ impl Aggregator {
             }
         }
 
-        // Если были найдены сматченные ордера, добавляем последние матчи в батч
+        // Добавляем последний неполный батч, если он существует
         if !matches.is_empty() {
             batches.push(matches);
         }
 
-        // Если не было ни одного матча, возвращаем пустое множество
+        // Логирование результата
         if batches.is_empty() {
             info!("No matching orders found.");
+        } else {
+            info!("====================================");
+            for batch in &batches {
+                info!("batch {:?}", batch);
+            }
+            info!("====================================");
         }
-
-
-        info!("====================================");
-        for i in &batches {
-            info!("batch {:?}", i);
-        };
-        info!("====================================");
 
         batches
     }
-
 }
-
