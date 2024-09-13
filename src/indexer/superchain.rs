@@ -1,27 +1,19 @@
-use log::info;
+use log::{error, info};
 use serde::Deserialize;
-use std::collections::{HashMap, HashSet};
-use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 use superchain_client::{
-    core::types::fuel::OrderChangeType,
-    futures::StreamExt,
-    provider::FuelProvider,
-    query::Bound,
-    requests::fuel::{GetFuelBlocksRequest, GetSparkOrderRequest},
-    Client, ClientBuilder, Format, WsProvider,
+    futures::StreamExt, provider::FuelProvider, query::Bound, requests::fuel::GetSparkOrderRequest,
+    ClientBuilder, Format, WsProvider,
 };
-use tokio::sync::{mpsc, Mutex};
-use tokio::time::Instant;
+use tokio::sync::mpsc;
 
-use crate::{config::env::ev, indexer::spot_order::SpotOrder};
+use crate::config::settings::Settings;
+use crate::error::Error;
+use crate::indexer::spot_order::OrderType;
+use crate::indexer::spot_order::SpotOrder;
+use crate::middleware::manager::OrderManagerMessage;
 
-#[derive(Debug)]
-struct ReceivedOrder {
-    order: SuperchainOrder,
-    receive_time: u64, // UNIX timestamp
-}
-
+#[allow(dead_code)]
 #[derive(Debug, Deserialize)]
 struct SuperchainOrder {
     chain: u64,
@@ -46,32 +38,12 @@ struct SuperchainOrder {
     match_price: Option<u128>,
 }
 
-#[derive(Debug, Deserialize)]
-struct BlockData {
-    chain: u64,
-    block_number: String,
-    hash: String,
-    parent_hash: String,
-    da_block_number: String,
-    transactions_root: String,
-    transactions_count: u64,
-    message_receipt_count: u64,
-    message_outbox_root: String,
-    event_inbox_root: String,
-    timestamp: u64,
-}
-
 pub async fn start_superchain_indexer(
-    sender: mpsc::Sender<SpotOrder>,
-) -> Result<(), Box<dyn std::error::Error>> {
-    let username = ev("SUPERCHAIN_USERNAME")?;
-    let password = ev("SUPERCHAIN_PASSWORD")?;
-    let _contract_id = ev("CONTRACT_ID_BTC_USDC")?;
-
-    let mut h_s_state_types = HashSet::new();
-    h_s_state_types.insert(OrderChangeType::Open);
-    h_s_state_types.insert(OrderChangeType::Match);
-    h_s_state_types.insert(OrderChangeType::Cancel);
+    sender: mpsc::Sender<OrderManagerMessage>,
+    config: Settings,
+) -> Result<(), Error> {
+    let username = config.websockets.superchain_username;
+    let password = config.websockets.superchain_pass;
 
     let client = ClientBuilder::default()
         .credential(&username, &password)
@@ -82,13 +54,10 @@ pub async fn start_superchain_indexer(
     info!("Superchain ws client created. Trying to connect");
 
     let request = GetSparkOrderRequest {
-        from_block: Bound::FromLatest(3),
+        from_block: Bound::FromLatest(10000),
         to_block: Bound::None,
-        order_type__in: h_s_state_types,
         ..Default::default()
     };
-
-    info!("Superchain ws request: {:?}", request);
 
     let stream = client
         .get_fuel_spark_orders_by_format(request, Format::JsonStream, false)
@@ -96,110 +65,124 @@ pub async fn start_superchain_indexer(
         .expect("Failed to get fuel spark orders");
     superchain_client::futures::pin_mut!(stream);
 
-    let received_orders: Arc<Mutex<HashMap<String, ReceivedOrder>>> =
-        Arc::new(Mutex::new(HashMap::new()));
-
-    let client_clone = ClientBuilder::default()
-        .credential(username.clone(), password.clone())
-        .endpoint("fuel.beta.superchain.network")
-        .build::<WsProvider>()
-        .await?;
-
-    let mut start_time = Instant::now();
-    let mut total_delay = 0u64;
-    let mut total_orders = 0u64;
-
-    // Основная обработка входящих ордеров
     while let Some(data) = stream.next().await {
-        info!("===============");
-        let data = data.unwrap();
-        let data_str = String::from_utf8(data).unwrap();
-        info!("data str {:?}",data_str);
-        let superchain_order: SuperchainOrder = serde_json::from_str(&data_str)?;
-        let order_id = &superchain_order.order_id.clone();
-        let b_num = superchain_order.block_number.clone();
+        match data {
+            Ok(valid_data) => {
+                let data_str = String::from_utf8(valid_data).unwrap();
+                let superchain_order: SuperchainOrder = serde_json::from_str(&data_str)?;
 
-        // Записываем время получения данных в UNIX формате
-        let receive_time = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_secs();
+                match superchain_order.state_type.as_str() {
+                    "Open" => {
+                        if let (Some(amount), Some(price), Some(order_type), Some(user)) = (
+                            superchain_order.amount,
+                            superchain_order.price,
+                            superchain_order.order_type.as_ref(),
+                            superchain_order.user.as_ref(),
+                        ) {
+                            let order_type_enum = match order_type.as_str() {
+                                "Buy" => OrderType::Buy,
+                                "Sell" => OrderType::Sell,
+                                _ => {
+                                    error!("Unknown order type: {}", order_type);
+                                    continue;
+                                }
+                            };
 
-        {
-            let mut orders = received_orders.lock().await;
-            orders.insert(
-                superchain_order.order_id.clone(),
-                ReceivedOrder {
-                    order: superchain_order,
-                    receive_time,
-                },
-            );
-        }
+                            let spot_order = SpotOrder {
+                                id: superchain_order.order_id.clone(),
+                                user: user.clone(),
+                                asset: superchain_order.asset.clone(),
+                                amount,
+                                price,
+                                timestamp: SystemTime::now()
+                                    .duration_since(UNIX_EPOCH)
+                                    .unwrap()
+                                    .as_secs(),
+                                order_type: order_type_enum,
+                            };
 
-        // Обработка метрик
-        if let Ok(block_timestamp) = get_block_timestamp(&client_clone, b_num).await {
-            let delay = if receive_time > block_timestamp {
-                receive_time - block_timestamp
-            } else {
-                0
-            };
+                            info!("Sending Open Order to manager: {:?}", spot_order);
+                            if let Err(e) =
+                                sender.send(OrderManagerMessage::AddOrder(spot_order)).await
+                            {
+                                error!("Failed to send order to manager: {:?}", e);
+                            }
+                        }
+                    }
+                    "Match" | "Cancel" => {
+                        let order_id = superchain_order.order_id.clone();
+                        let price = superchain_order.price.unwrap_or_default();
 
-            info!("Order ID: {:?} Delay: {} seconds", order_id, delay);
+                        if let Some(order_type_str) = superchain_order.order_type.as_deref() {
+                            let order_type_enum = match order_type_str {
+                                "Buy" => OrderType::Buy,
+                                "Sell" => OrderType::Sell,
+                                _ => {
+                                    error!(
+                                        "Unknown order type for removing order: {:?}",
+                                        order_type_str
+                                    );
+                                    continue;
+                                }
+                            };
 
-            total_delay += delay;
-            total_orders += 1;
-        }
+                            info!(
+                                "Removing Order from manager: {:?}, with order_type: {:?}",
+                                order_id, order_type_enum
+                            );
 
-        // Печать метрик каждые 5 минут
-        if start_time.elapsed().as_secs() >= 30 {
-            let average_delay = total_delay as f64 / total_orders as f64;
-            let average_update_time = start_time.elapsed().as_secs() as f64 / total_orders as f64;
+                            let remove_message = OrderManagerMessage::RemoveOrder {
+                                order_id,
+                                price,
+                                order_type: order_type_enum,
+                            };
 
-            info!("==================== METRICS ====================");
-            info!(
-                "Average WebSocket update time: {:.2} seconds",
-                average_update_time
-            );
-            info!(
-                "Average block to WebSocket time: {:.2} seconds",
-                average_delay
-            );
-            info!("Total orders processed: {}", total_orders);
-            info!("=================================================");
+                            if let Err(e) = sender.send(remove_message).await {
+                                error!("Failed to send remove order message to manager: {:?}", e);
+                            }
+                        } else {
+                            info!(
+                                "Removing Order from manager without known order_type: {:?}",
+                                order_id
+                            );
 
-            // Сбрасываем таймер и метрики
-            total_delay = 0;
-            total_orders = 0;
-            start_time = Instant::now();
+                            let remove_buy_message = OrderManagerMessage::RemoveOrder {
+                                order_id: order_id.clone(),
+                                price,
+                                order_type: OrderType::Buy,
+                            };
+
+                            let remove_sell_message = OrderManagerMessage::RemoveOrder {
+                                order_id,
+                                price,
+                                order_type: OrderType::Sell,
+                            };
+
+                            if let Err(e) = sender.send(remove_buy_message).await {
+                                error!(
+                                    "Failed to send remove buy order message to manager: {:?}",
+                                    e
+                                );
+                            }
+
+                            if let Err(e) = sender.send(remove_sell_message).await {
+                                error!(
+                                    "Failed to send remove sell order message to manager: {:?}",
+                                    e
+                                );
+                            }
+                        }
+                    }
+                    _ => {
+                        error!("Unknown state_type: {}", superchain_order.state_type);
+                    }
+                }
+            }
+            Err(e) => {
+                error!("Error {:?}", e);
+            }
         }
     }
 
     Ok(())
-}
-
-async fn get_block_timestamp(
-    client: &Client<WsProvider>,
-    block_number: u64,
-) -> Result<u64, Box<dyn std::error::Error>> {
-    let request = GetFuelBlocksRequest {
-        from_block: Bound::Exact(block_number as i64),
-        to_block: Bound::Exact(block_number as i64 + 1),
-        ..Default::default()
-    };
-
-    let mut block_stream = client
-        .get_fuel_blocks_by_format(request, Format::JsonStream, false)
-        .await?;
-
-    if let Some(block_data) = block_stream.next().await {
-        let data_str = String::from_utf8(block_data?)?;
-        let block_info: BlockData = serde_json::from_str(&data_str)?;
-        info!("=========");
-        info!("Block data: {:?}", block_info);
-        info!("Block ts: {:?}", block_info.timestamp);
-        info!("=========");
-        Ok(block_info.timestamp)
-    } else {
-        Err("Failed to retrieve block timestamp".into())
-    }
 }

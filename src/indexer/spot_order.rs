@@ -1,6 +1,8 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
+use crate::error::Error;
+
 // NTD Adapt spark-sdk OrderType to that type
 #[derive(Debug, PartialEq, Eq, Clone, Copy, JsonSchema, Serialize, Deserialize)]
 pub enum OrderType {
@@ -38,7 +40,7 @@ impl PartialOrd for SpotOrder {
 }
 
 #[derive(Debug, Clone, Deserialize)]
-pub struct SpotOrderIndexer {
+pub struct SpotOrderEnvio {
     pub id: String,
     pub user: String,
     pub asset: String,
@@ -52,10 +54,22 @@ pub struct SpotOrderIndexer {
     pub initial_amount: Option<String>,
 }
 
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SubsquidOrder {
+    pub id: String,
+    pub asset: String,
+    pub amount: String,
+    pub price: String,
+    pub timestamp: String,
+    pub order_type: String,
+    pub user: String,
+    pub status: String,
+    pub initial_amount: String,
+}
+
 impl SpotOrder {
-    pub fn from_indexer(
-        intermediate: SpotOrderIndexer,
-    ) -> Result<Self, Box<dyn std::error::Error>> {
+    pub fn from_indexer_envio(intermediate: SpotOrderEnvio) -> Result<Self, Error> {
         let amount = intermediate.amount.parse::<u128>()?;
         let price = intermediate.price.parse::<u128>()?;
         let timestamp =
@@ -71,25 +85,53 @@ impl SpotOrder {
             order_type: intermediate.order_type,
         })
     }
+
+    pub fn from_indexer_subsquid(order: SubsquidOrder) -> Result<Self, Error> {
+        let amount = order.amount.parse::<u128>()?;
+        let price = order.price.parse::<u128>()?;
+        let timestamp = chrono::DateTime::parse_from_rfc3339(&order.timestamp)?.timestamp() as u64;
+
+        let order_type = match order.order_type.as_str() {
+            "Buy" => OrderType::Buy,
+            "Sell" => OrderType::Sell,
+            _ => return Err("Unknown order type".into()),
+        };
+
+        Ok(SpotOrder {
+            id: order.id,
+            user: order.user,
+            asset: order.asset,
+            amount,
+            price,
+            timestamp,
+            order_type,
+        })
+    }
 }
 
 #[derive(Debug, Clone, Deserialize)]
-pub struct OrderPayload {
+pub struct OrderPayloadSubsquid {
+    pub active_buy_orders: Option<Vec<SubsquidOrder>>,
+    pub active_sell_orders: Option<Vec<SubsquidOrder>>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct OrderPayloadEnvio {
     #[serde(rename = "ActiveBuyOrder")]
-    pub active_buy_order: Option<Vec<SpotOrderIndexer>>,
+    pub active_buy_order: Option<Vec<SpotOrderEnvio>>,
 
     #[serde(rename = "ActiveSellOrder")]
-    pub active_sell_order: Option<Vec<SpotOrderIndexer>>,
+    pub active_sell_order: Option<Vec<SpotOrderEnvio>>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
-pub struct DataPayload {
-    pub data: OrderPayload,
+pub struct DataPayloadEnvio {
+    pub data: OrderPayloadEnvio,
 }
 
 #[derive(Debug, Clone, Deserialize)]
-pub struct WebSocketResponse {
+pub struct WebSocketResponseEnvio {
     pub r#type: String,
     pub id: Option<String>,
-    pub payload: Option<DataPayload>,
+    pub payload: Option<DataPayloadEnvio>,
 }

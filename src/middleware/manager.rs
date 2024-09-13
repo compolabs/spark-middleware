@@ -4,6 +4,17 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
+#[derive(Debug)]
+pub enum OrderManagerMessage {
+    AddOrder(SpotOrder),
+    RemoveOrder {
+        order_id: String,
+        price: u128,
+        order_type: OrderType,
+    },
+    ClearAndAddOrders(Vec<SpotOrder>),
+}
+
 pub struct OrderManager {
     pub buy_orders: RwLock<BTreeMap<u128, Vec<SpotOrder>>>,
     pub sell_orders: RwLock<BTreeMap<u128, Vec<SpotOrder>>>,
@@ -17,28 +28,35 @@ impl OrderManager {
         })
     }
 
+    pub async fn handle_message(&self, message: OrderManagerMessage) {
+        match message {
+            OrderManagerMessage::AddOrder(order) => self.add_order(order).await,
+            OrderManagerMessage::RemoveOrder {
+                order_id,
+                price,
+                order_type,
+            } => self.remove_order(&order_id, price, order_type).await,
+            OrderManagerMessage::ClearAndAddOrders(orders) => {
+                self.clear_and_add_orders(orders).await;
+            }
+        }
+    }
+
     pub async fn add_order(&self, order: SpotOrder) {
         let mut order_map = match order.order_type {
             OrderType::Buy => self.buy_orders.write().await,
             OrderType::Sell => self.sell_orders.write().await,
         };
-        println!("adding order {:?}", &order);
 
         let orders = order_map.entry(order.price).or_default();
 
         if let Some(existing_order) = orders.iter_mut().find(|o| o.id == order.id) {
-            *existing_order = order;
+            *existing_order = order.clone();
+            info!("Updated existing order: {:?}", existing_order);
         } else {
-            orders.push(order);
+            orders.push(order.clone());
+            info!("Added new order: {:?}", order);
         }
-    }
-
-    pub async fn clear_orders(&self) {
-        let mut buy_orders = self.buy_orders.write().await;
-        let mut sell_orders = self.sell_orders.write().await;
-        buy_orders.clear();
-        sell_orders.clear();
-        info!("All orders have been cleared from OrderManager");
     }
 
     pub async fn remove_order(&self, order_id: &str, price: u128, order_type: OrderType) {
@@ -52,7 +70,29 @@ impl OrderManager {
             if orders.is_empty() {
                 order_map.remove(&price);
             }
+            info!("Removed order with id: {}", order_id);
         }
+    }
+
+    pub async fn clear_and_add_orders(&self, orders: Vec<SpotOrder>) {
+        println!("========================");
+        println!("========================");
+        println!("========================");
+        println!("{:?}", orders);
+        if !orders.is_empty() {
+            self.clear_orders().await;
+            for order in orders {
+                self.add_order(order).await;
+            }
+        }
+    }
+
+    pub async fn clear_orders(&self) {
+        let mut buy_orders = self.buy_orders.write().await;
+        let mut sell_orders = self.sell_orders.write().await;
+        buy_orders.clear();
+        sell_orders.clear();
+        info!("All orders have been cleared from OrderManager");
     }
 
     pub async fn get_orders(&self, price: u128, order_type: OrderType) -> Vec<SpotOrder> {
