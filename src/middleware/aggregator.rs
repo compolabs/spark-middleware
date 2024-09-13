@@ -186,7 +186,6 @@ impl Aggregator {
         let mut buy_queue = BinaryHeap::new();
         let mut sell_queue = BinaryHeap::new();
 
-        // Получаем все buy и sell ордера и добавляем их в соответствующие очереди
         let (buy_orders, sell_orders) = self.get_all_orders_without_type_tuple().await;
         buy_queue.extend(buy_orders.into_iter());
         sell_queue.extend(sell_orders.into_iter().map(Reverse));
@@ -194,16 +193,12 @@ impl Aggregator {
         let mut matches = Vec::with_capacity(batch_size);
         let mut batches = Vec::new();
 
-        // Пока есть ордера в обеих очередях
         while let (Some(mut buy_order), Some(Reverse(mut sell_order))) =
             (buy_queue.pop(), sell_queue.pop())
         {
-            // Проверяем, может ли buy ордер быть сматчен с sell ордером
             if buy_order.price >= sell_order.price {
-                // Добавляем ордера в текущий батч
                 matches.push((buy_order.clone(), sell_order.clone()));
 
-                // Обновляем количество сматченных ордеров
                 match buy_order.amount.cmp(&sell_order.amount) {
                     Ordering::Greater => {
                         buy_order.amount -= sell_order.amount;
@@ -214,26 +209,21 @@ impl Aggregator {
                         sell_queue.push(Reverse(sell_order));
                     }
                     Ordering::Equal => {
-                        // Все ордера полностью сматчены, ничего не нужно делать
                     }
                 }
 
-                // Если батч полон, добавляем его в список и начинаем новый
                 if matches.len() == batch_size {
-                    batches.push(std::mem::take(&mut matches)); // Очищаем текущий батч без выделения новой памяти
+                    batches.push(std::mem::take(&mut matches)); 
                 }
             } else {
-                // Если нельзя сматчить, возвращаем sell ордер обратно в очередь
                 sell_queue.push(Reverse(sell_order));
             }
         }
 
-        // Добавляем последний неполный батч, если он существует
         if !matches.is_empty() {
             batches.push(matches);
         }
 
-        // Логирование результата
         if batches.is_empty() {
             info!("No matching orders found.");
         } else {

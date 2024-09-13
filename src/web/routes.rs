@@ -8,9 +8,12 @@ use rocket_okapi::swagger_ui::SwaggerUIConfig;
 use rocket_okapi::{openapi, openapi_get_routes, JsonSchema};
 use serde::{Deserialize, Serialize};
 
+use async_graphql_rocket::{GraphQLQuery, GraphQLRequest, GraphQLResponse};
+
 use crate::indexer::spot_order::{OrderType, SpotOrder};
 use crate::middleware::aggregator::Aggregator;
 use crate::middleware::manager::OrderManager;
+use crate::web::graphql::AppSchema;
 
 #[derive(Serialize, JsonSchema)]
 pub struct OrdersResponse {
@@ -155,6 +158,24 @@ async fn get_aggregated_spread(aggregator: &State<Arc<Aggregator>>) -> Json<Spre
         spread,
     })
 }
+
+#[rocket::get("/graphql?<query..>")]
+pub async fn graphql_query(schema: &State<AppSchema>, query: GraphQLQuery) -> GraphQLResponse {
+    query.execute(schema.inner()).await
+}
+
+#[rocket::post("/graphql", data = "<request>", format = "application/json")]
+pub async fn graphql_request(schema: &State<AppSchema>, request: GraphQLRequest) -> GraphQLResponse {
+    request.execute(schema.inner()).await
+}
+
+#[rocket::get("/graphiql")]
+pub fn graphiql() -> rocket::response::content::RawHtml<String> {
+    rocket::response::content::RawHtml(
+        async_graphql::http::GraphiQLSource::build().endpoint("/graphql").finish()
+    )
+}
+
 
 pub fn get_routes() -> Vec<Route> {
     openapi_get_routes![
