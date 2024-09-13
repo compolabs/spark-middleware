@@ -40,26 +40,25 @@ impl WebSocketClientEnvio {
                 .await
                 .expect("Failed to send init message");
 
-            let mut last_data_time = Instant::now();
+            let mut last_real_data_time = Instant::now(); 
             while let Some(message) = ws_stream.next().await {
-                if Instant::now().duration_since(last_data_time)
-                    > tokio::time::Duration::from_secs(60)
+                if Instant::now().duration_since(last_real_data_time)
+                    > tokio::time::Duration::from_secs(20)
                 {
-                    error!("No data messages received for the last 60 seconds, reconnecting...");
+                    error!("No real data received for 20 seconds, reconnecting...");
                     break;
                 }
+                
                 match message {
                     Ok(Message::Text(text)) => {
-                        if let Ok(response) = serde_json::from_str::<WebSocketResponseEnvio>(&text)
-                        {
+                        if let Ok(response) = serde_json::from_str::<WebSocketResponseEnvio>(&text) {
                             match response.r#type.as_str() {
                                 "ka" => {
                                     info!("Received keep-alive message.");
-                                    last_data_time = Instant::now();
-                                    continue;
+                                    continue; 
                                 }
                                 "connection_ack" => {
-                                    if !initialized {
+                                    if (!initialized) {
                                         info!("Connection established, subscribing to orders...");
                                         self.subscribe_to_orders(OrderType::Buy, &mut ws_stream)
                                             .await?;
@@ -69,6 +68,8 @@ impl WebSocketClientEnvio {
                                     }
                                 }
                                 "data" => {
+                                    last_real_data_time = Instant::now();
+
                                     if let Some(payload) = response.payload {
                                         if let Some(orders) = payload.data.active_buy_order {
                                             for order_indexer in orders {
@@ -90,7 +91,6 @@ impl WebSocketClientEnvio {
                                                     .map_err(|_| Error::OrderManagerSendError)?;
                                             }
                                         }
-                                        last_data_time = Instant::now();
                                     }
                                 }
                                 _ => {}
@@ -111,6 +111,8 @@ impl WebSocketClientEnvio {
                 .await?;
             self.unsubscribe_orders(&mut ws_stream, OrderType::Sell)
                 .await?;
+
+            tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
         }
     }
 
