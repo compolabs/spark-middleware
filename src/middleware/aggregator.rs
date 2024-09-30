@@ -1,11 +1,9 @@
-use crate::indexer::spot_order::OrderType;
-use crate::indexer::spot_order::SpotOrder;
+use crate::indexer::spot_order::{OrderType, SpotOrder};
 use crate::middleware::manager::OrderManager;
 use log::info;
 use std::cmp::Ordering;
 use std::cmp::Reverse;
-use std::collections::BinaryHeap;
-use std::collections::HashMap;
+use std::collections::{BinaryHeap, HashMap};
 use std::sync::Arc;
 
 pub struct Aggregator {
@@ -36,6 +34,14 @@ impl Aggregator {
         self.get_all_orders_without_type().await
     }
 
+    pub async fn get_all_aggregated_buy_orders(&self) -> Vec<SpotOrder> {
+        self.get_all_orders(OrderType::Buy).await
+    }
+
+    pub async fn get_all_aggregated_sell_orders(&self) -> Vec<SpotOrder> {
+        self.get_all_orders(OrderType::Sell).await
+    }
+
     async fn get_orders_with_consensus(&self, order_type: OrderType) -> Vec<SpotOrder> {
         let mut order_counts: HashMap<String, u8> = HashMap::new();
         let mut order_map: HashMap<String, SpotOrder> = HashMap::new();
@@ -43,8 +49,8 @@ impl Aggregator {
         for (indexer_name, manager) in &self.order_managers {
             if self.active_indexers.contains(indexer_name) {
                 let orders = match order_type {
-                    OrderType::Buy => manager.get_all_buy_orders().await,
-                    OrderType::Sell => manager.get_all_sell_orders().await,
+                    OrderType::Buy => manager.order_pool.get_best_buy_orders(),
+                    OrderType::Sell => manager.order_pool.get_best_sell_orders(),
                 };
 
                 for order in orders {
@@ -68,8 +74,8 @@ impl Aggregator {
         for (indexer_name, manager) in &self.order_managers {
             if self.active_indexers.contains(indexer_name) {
                 let orders = match order_type {
-                    OrderType::Buy => manager.get_all_buy_orders().await,
-                    OrderType::Sell => manager.get_all_sell_orders().await,
+                    OrderType::Buy => manager.order_pool.get_best_buy_orders(),
+                    OrderType::Sell => manager.order_pool.get_best_sell_orders(),
                 };
                 aggregated_orders.extend(orders);
             }
@@ -83,10 +89,10 @@ impl Aggregator {
 
         for (indexer_name, manager) in &self.order_managers {
             if self.active_indexers.contains(indexer_name) {
-                let orders_buy = manager.get_all_buy_orders().await;
-                let orders_sell = manager.get_all_sell_orders().await;
-                aggregated_orders.extend(orders_buy);
-                aggregated_orders.extend(orders_sell);
+                let buy_orders = manager.order_pool.get_best_buy_orders();
+                let sell_orders = manager.order_pool.get_best_sell_orders();
+                aggregated_orders.extend(buy_orders);
+                aggregated_orders.extend(sell_orders);
             }
         }
 
@@ -99,10 +105,10 @@ impl Aggregator {
 
         for (indexer_name, manager) in &self.order_managers {
             if self.active_indexers.contains(indexer_name) {
-                let orders_buy = manager.get_all_buy_orders().await;
-                let orders_sell = manager.get_all_sell_orders().await;
-                aggregated_buy_orders.extend(orders_buy);
-                aggregated_sell_orders.extend(orders_sell);
+                let buy_orders = manager.order_pool.get_best_buy_orders();
+                let sell_orders = manager.order_pool.get_best_sell_orders();
+                aggregated_buy_orders.extend(buy_orders);
+                aggregated_sell_orders.extend(sell_orders);
             }
         }
 
@@ -119,18 +125,7 @@ impl Aggregator {
 
     pub async fn remove_matched_orders(&self, matched_order_ids: Vec<String>) {
         for manager in self.order_managers.values() {
-            let mut buy_orders = manager.buy_orders.write().await;
-            let mut sell_orders = manager.sell_orders.write().await;
-
-            buy_orders.retain(|_, orders| {
-                orders.retain(|order| !matched_order_ids.contains(&order.id));
-                !orders.is_empty()
-            });
-
-            sell_orders.retain(|_, orders| {
-                orders.retain(|order| !matched_order_ids.contains(&order.id));
-                !orders.is_empty()
-            });
+            manager.order_pool.clear_orders(); 
         }
         info!("Matched orders removed from the collections.");
     }
@@ -179,6 +174,7 @@ impl Aggregator {
         matches
     }
 
+
     pub async fn select_matching_batches(
         &self,
         batch_size: usize,
@@ -187,6 +183,10 @@ impl Aggregator {
         let mut sell_queue = BinaryHeap::new();
 
         let (buy_orders, sell_orders) = self.get_all_orders_without_type_tuple().await;
+
+        
+        info!("Found {} buy orders and {} sell orders for matching", buy_orders.len(), sell_orders.len());
+
         buy_queue.extend(buy_orders.into_iter());
         sell_queue.extend(sell_orders.into_iter().map(Reverse));
 
@@ -208,14 +208,14 @@ impl Aggregator {
                         sell_order.amount -= buy_order.amount;
                         sell_queue.push(Reverse(sell_order));
                     }
-                    Ordering::Equal => {
-                    }
+                    Ordering::Equal => {}
                 }
 
                 if matches.len() == batch_size {
-                    batches.push(std::mem::take(&mut matches)); 
+                    batches.push(std::mem::take(&mut matches));
                 }
             } else {
+                info!("No match for buy order at price {} and sell order at price {}", buy_order.price, sell_order.price);
                 sell_queue.push(Reverse(sell_order));
             }
         }
@@ -223,17 +223,6 @@ impl Aggregator {
         if !matches.is_empty() {
             batches.push(matches);
         }
-
-        if batches.is_empty() {
-            info!("No matching orders found.");
-        } else {
-            info!("====================================");
-            for batch in &batches {
-                info!("batch {:?}", batch);
-            }
-            info!("====================================");
-        }
-
         batches
     }
 }

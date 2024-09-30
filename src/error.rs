@@ -11,8 +11,17 @@ pub enum Error {
     #[error("Fuel_crypto private key parsing error")]
     FuelCryptoPrivParseError,
 
+    #[error("Envio websocket connection error")]
+    EnvioWebsocketConnectionError,
+
+    #[error("Envio websocket connection timeout error")]
+    EnvioWebsocketConnectionTimeoutError,
+
     #[error("Failed to match orders: {0}")]
     MatchOrdersError(String),
+
+    #[error("Failed to send orders to matcher")]
+    SendingToMatcherError,
 
     #[error("Failed to parse order amount: {0}")]
     OrderAmountParseError(String),

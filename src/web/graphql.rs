@@ -1,15 +1,15 @@
-use async_graphql::{Schema, Object, Context, SimpleObject, EmptyMutation, EmptySubscription};
+use crate::indexer::spot_order::OrderType;
+use crate::middleware::aggregator::Aggregator;
+use crate::middleware::manager::OrderManager;
+use async_graphql::{Context, EmptyMutation, EmptySubscription, Object, Schema, SimpleObject};
 use std::collections::HashMap;
 use std::sync::Arc;
-use crate::middleware::manager::OrderManager;
-use crate::middleware::aggregator::Aggregator;
-use crate::indexer::spot_order::OrderType;
 
 #[derive(SimpleObject)]
 struct Order {
     id: String,
-    price: String, 
-    amount: String, 
+    price: String,
+    amount: String,
     order_type: String,
 }
 
@@ -18,11 +18,7 @@ pub struct QueryRoot;
 
 #[Object]
 impl QueryRoot {
-    async fn orders_by_indexer(
-        &self,
-        ctx: &Context<'_>,
-        indexer: String,
-    ) -> Vec<Order> {
+    async fn orders_by_indexer(&self, ctx: &Context<'_>, indexer: String) -> Vec<Order> {
         let managers = ctx.data::<HashMap<String, Arc<OrderManager>>>().unwrap();
         if let Some(manager) = managers.get(&indexer) {
             let buy_orders = manager.get_all_buy_orders().await;
@@ -33,7 +29,7 @@ impl QueryRoot {
                 .chain(sell_orders)
                 .map(|o| Order {
                     id: o.id,
-                    price: o.price.to_string(),  
+                    price: o.price.to_string(),
                     amount: o.amount.to_string(),
                     order_type: format!("{:?}", o.order_type),
                 })
@@ -53,7 +49,7 @@ impl QueryRoot {
             .chain(sell_orders)
             .map(|o| Order {
                 id: o.id,
-                price: o.price.to_string(),  
+                price: o.price.to_string(),
                 amount: o.amount.to_string(),
                 order_type: format!("{:?}", o.order_type),
             })

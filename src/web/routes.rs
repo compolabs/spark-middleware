@@ -9,11 +9,26 @@ use rocket_okapi::{openapi, openapi_get_routes, JsonSchema};
 use serde::{Deserialize, Serialize};
 
 use async_graphql_rocket::{GraphQLQuery, GraphQLRequest, GraphQLResponse};
+use tokio::sync::Mutex;
 
 use crate::indexer::spot_order::{OrderType, SpotOrder};
+use crate::metrics::types::OrderMetrics;
 use crate::middleware::aggregator::Aggregator;
 use crate::middleware::manager::OrderManager;
-use crate::web::graphql::AppSchema;
+
+#[derive(Serialize, JsonSchema)]
+pub struct MetricsResponse {
+    pub total_matched: u64,
+    pub total_remaining: u64,
+    pub matched_per_second: f64,
+}
+
+#[derive(Serialize, JsonSchema)]
+pub struct OrdersCountResponse {
+    pub total_orders: usize,
+    pub total_buy_orders: usize,
+    pub total_sell_orders: usize,
+}
 
 #[derive(Serialize, JsonSchema)]
 pub struct OrdersResponse {
@@ -62,13 +77,40 @@ pub struct SpreadResponse {
 }
 
 #[openapi]
+#[get("/metrics")]
+async fn get_metrics(metrics: &State<Arc<Mutex<OrderMetrics>>>) -> Json<MetricsResponse> {
+    let metrics = metrics.lock().await;
+    Json(MetricsResponse {
+        total_matched: metrics.total_matched,
+        total_remaining: metrics.total_remaining,
+        matched_per_second: metrics.matched_per_second,
+    })
+}
+
+#[openapi]
+#[get("/orders/count")]
+async fn get_orders_count(aggregator: &State<Arc<Aggregator>>) -> Json<OrdersCountResponse> {
+    let buy_orders = aggregator.get_all_aggregated_buy_orders().await;
+    let sell_orders = aggregator.get_all_aggregated_sell_orders().await;
+
+    let total_orders = buy_orders.len() + sell_orders.len();
+
+    Json(OrdersCountResponse {
+        total_orders,
+        total_buy_orders: buy_orders.len(),
+        total_sell_orders: sell_orders.len(),
+    })
+}
+
+#[openapi]
 #[get("/orders/<indexer>/buy")]
 async fn get_buy_orders(
     indexer: Indexer,
     managers: &State<HashMap<String, Arc<OrderManager>>>,
 ) -> Option<Json<OrdersResponse>> {
     if let Some(manager) = managers.get(indexer.as_str()) {
-        let buy_orders = manager.get_all_buy_orders().await;
+        
+        let buy_orders = manager.order_pool.get_best_buy_orders();
         return Some(Json(OrdersResponse { orders: buy_orders }));
     }
     None
@@ -81,7 +123,8 @@ async fn get_sell_orders(
     managers: &State<HashMap<String, Arc<OrderManager>>>,
 ) -> Option<Json<OrdersResponse>> {
     if let Some(manager) = managers.get(indexer.as_str()) {
-        let sell_orders = manager.get_all_sell_orders().await;
+        
+        let sell_orders = manager.order_pool.get_best_sell_orders();
         return Some(Json(OrdersResponse {
             orders: sell_orders,
         }));
@@ -112,11 +155,17 @@ async fn get_indexer_spread(
     managers: &State<HashMap<String, Arc<OrderManager>>>,
 ) -> Option<Json<SpreadResponse>> {
     if let Some(manager) = managers.get(indexer.as_str()) {
-        let buy_orders = manager.get_all_buy_orders().await;
-        let sell_orders = manager.get_all_sell_orders().await;
+        let buy_orders = manager.order_pool.get_best_buy_orders();
+        let sell_orders = manager.order_pool.get_best_sell_orders();
 
-        let best_buy = buy_orders.iter().max_by_key(|order| order.price).map(|order| order.price);
-        let best_sell = sell_orders.iter().min_by_key(|order| order.price).map(|order| order.price);
+        let best_buy = buy_orders
+            .iter()
+            .max_by_key(|order| order.price)
+            .map(|order| order.price);
+        let best_sell = sell_orders
+            .iter()
+            .min_by_key(|order| order.price)
+            .map(|order| order.price);
 
         let spread = if let (Some(buy), Some(sell)) = (best_buy, best_sell) {
             Some(sell as i128 - buy as i128)
@@ -143,8 +192,14 @@ async fn get_aggregated_spread(aggregator: &State<Arc<Aggregator>>) -> Json<Spre
         .get_aggregated_orders(crate::indexer::spot_order::OrderType::Sell)
         .await;
 
-    let best_buy = buy_orders.iter().max_by_key(|order| order.price).map(|order| order.price);
-    let best_sell = sell_orders.iter().min_by_key(|order| order.price).map(|order| order.price);
+    let best_buy = buy_orders
+        .iter()
+        .max_by_key(|order| order.price)
+        .map(|order| order.price);
+    let best_sell = sell_orders
+        .iter()
+        .min_by_key(|order| order.price)
+        .map(|order| order.price);
 
     let spread = if let (Some(buy), Some(sell)) = (best_buy, best_sell) {
         Some(sell as i128 - buy as i128)
@@ -159,24 +214,6 @@ async fn get_aggregated_spread(aggregator: &State<Arc<Aggregator>>) -> Json<Spre
     })
 }
 
-#[rocket::get("/graphql?<query..>")]
-pub async fn graphql_query(schema: &State<AppSchema>, query: GraphQLQuery) -> GraphQLResponse {
-    query.execute(schema.inner()).await
-}
-
-#[rocket::post("/graphql", data = "<request>", format = "application/json")]
-pub async fn graphql_request(schema: &State<AppSchema>, request: GraphQLRequest) -> GraphQLResponse {
-    request.execute(schema.inner()).await
-}
-
-#[rocket::get("/graphiql")]
-pub fn graphiql() -> rocket::response::content::RawHtml<String> {
-    rocket::response::content::RawHtml(
-        async_graphql::http::GraphiQLSource::build().endpoint("/graphql").finish()
-    )
-}
-
-
 pub fn get_routes() -> Vec<Route> {
     openapi_get_routes![
         get_buy_orders,
@@ -184,7 +221,9 @@ pub fn get_routes() -> Vec<Route> {
         get_aggregated_buy_orders,
         get_aggregated_sell_orders,
         get_indexer_spread,
-        get_aggregated_spread
+        get_aggregated_spread,
+        get_orders_count,
+        get_metrics
     ]
 }
 

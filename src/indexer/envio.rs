@@ -1,16 +1,19 @@
+use std::{sync::Arc, time::Duration};
+
 use futures_util::{SinkExt, StreamExt};
-use log::{error, info};
-use tokio::{net::TcpStream, sync::mpsc, time::Instant};
+use log::{error, info, warn};
+use tokio::{net::TcpStream, sync::{mpsc, Mutex}, time::Instant};
 use tokio_tungstenite::{
     connect_async, tungstenite::protocol::Message, MaybeTlsStream, WebSocketStream,
 };
 use url::Url;
 
 use crate::{
+    config::env::ev,
     error::Error,
     indexer::spot_order::{OrderType, SpotOrder, WebSocketResponseEnvio},
     middleware::manager::OrderManagerMessage,
-    subscription::envio::format_graphql_subscription,
+    subscription::envio::{format_graphql_count_query, format_graphql_pagination_subscription}, 
 };
 
 pub struct WebSocketClientEnvio {
@@ -22,126 +25,199 @@ impl WebSocketClientEnvio {
         WebSocketClientEnvio { url }
     }
 
-    pub async fn connect(&self, sender: mpsc::Sender<OrderManagerMessage>) -> Result<(), Error> {
-        loop {
-            let mut initialized = false;
-            let mut ws_stream = match self.connect_to_ws().await {
-                Ok(ws_stream) => ws_stream,
-                Err(e) => {
-                    error!("Failed to establish websocket connection: {:?}", e);
-                    continue;
-                }
-            };
+    pub async fn synchronize(&self, order_type: OrderType, sender: mpsc::Sender<OrderManagerMessage>) -> Result<(), Error> {
+        let ws_stream = Arc::new(Mutex::new(self.connect_to_ws().await?)); 
 
-            info!("WebSocket connected");
+        info!("Starting synchronization of historical {:?} orders...", order_type);
 
-            ws_stream
+        
+        self.synchronize_orders(order_type, ws_stream, sender.clone()).await?;
+
+        Ok(())
+    }
+        
+     pub async fn connect(self: Arc<Self>, sender: mpsc::Sender<OrderManagerMessage>) -> Result<(), Error> {
+        
+        let ws_stream_sell= Arc::new(Mutex::new(self.connect_to_ws().await?)); 
+        info!("WebSocket connected");
+
+        ws_stream_sell.lock().await
+            .send(Message::Text(r#"{"type": "connection_init"}"#.into()))
+            .await
+            .expect("Failed to send init message");
+
+        let ws_stream_buy= Arc::new(Mutex::new(self.connect_to_ws().await?)); 
+        info!("WebSocket connected");
+
+        ws_stream_buy.lock().await
+            .send(Message::Text(r#"{"type": "connection_init"}"#.into()))
+            .await
+            .expect("Failed to send init message");
+
+        
+        info!("Starting synchronization of historical sell orders...");
+        self.synchronize_orders(OrderType::Sell, ws_stream_sell.clone(), sender.clone()).await?;
+        
+        info!("Closing WebSocket connection after synchronization...");
+        {
+            let mut ws_stream_lock = ws_stream_sell.lock().await;
+            ws_stream_lock.close(None).await.expect("Failed to close WebSocket connection properly");
+        }
+
+        tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
+
+        
+        info!("Starting synchronization of historical buy orders...");
+        self.synchronize_orders(OrderType::Buy, ws_stream_buy.clone(), sender.clone()).await?;
+
+        
+        info!("Closing WebSocket connection after synchronization...");
+        {
+            let mut ws_stream_lock = ws_stream_buy.lock().await;
+            ws_stream_lock.close(None).await.expect("Failed to close WebSocket connection properly");
+        }
+
+        
+        let new_ws_stream = Arc::new(Mutex::new(self.connect_to_ws().await?)); 
+        info!("Reconnected WebSocket for subscriptions.");
+
+        {
+            let new_ws_stream = new_ws_stream.clone();
+            new_ws_stream.lock().await
                 .send(Message::Text(r#"{"type": "connection_init"}"#.into()))
                 .await
-                .expect("Failed to send init message");
+                .expect("Failed to send init message after reconnection");
+        }
 
-            let mut last_real_data_time = Instant::now(); 
-            while let Some(message) = ws_stream.next().await {
-                if Instant::now().duration_since(last_real_data_time)
-                    > tokio::time::Duration::from_secs(20)
-                {
-                    error!("No real data received for 20 seconds, reconnecting...");
-                    break;
+        
+        info!("Synchronization complete, switching to subscription mode...");
+
+        
+        let new_ws_stream_clone = new_ws_stream.clone(); 
+        let buy_subscribe_task = {
+            let self_clone = Arc::clone(&self); 
+            let sender_clone = sender.clone(); 
+            tokio::spawn(async move {
+                self_clone.subscribe_to_updates(OrderType::Buy, new_ws_stream_clone, sender_clone).await
+            })
+        };
+
+        let new_ws_stream_clone = new_ws_stream.clone(); 
+        let sell_subscribe_task = {
+            let self_clone = Arc::clone(&self); 
+            let sender_clone = sender.clone(); 
+            tokio::spawn(async move {
+                self_clone.subscribe_to_updates(OrderType::Sell, new_ws_stream_clone, sender_clone).await
+            })
+        };
+
+        
+        let _ = tokio::join!(buy_subscribe_task, sell_subscribe_task);
+
+        Ok(())
+    }
+
+    async fn synchronize_orders(
+        &self,
+        order_type: OrderType,
+        client: Arc<Mutex<WebSocketStream<MaybeTlsStream<TcpStream>>>>, 
+        sender: mpsc::Sender<OrderManagerMessage>,
+    ) -> Result<(), Error> {
+        let mut offset = 0;
+        let limit = ev("FETCH_ORDER_LIMIT").unwrap_or("100".to_string()).parse::<u64>().unwrap_or(100);
+
+        loop {
+            let subscription_query = format_graphql_pagination_subscription(order_type, offset, limit);
+            info!("Fetching historical {:?} orders with offset: {}", order_type, offset);
+
+            let start_msg = serde_json::json!({
+                "id": format!("{}", order_type as u8),
+                "type": "start",
+                "payload": {
+                    "query": subscription_query
                 }
-                
-                match message {
-                    Ok(Message::Text(text)) => {
-                        if let Ok(response) = serde_json::from_str::<WebSocketResponseEnvio>(&text) {
-                            match response.r#type.as_str() {
-                                "ka" => {
-                                    info!("Received keep-alive message.");
-                                    continue; 
-                                }
-                                "connection_ack" => {
-                                    if (!initialized) {
-                                        info!("Connection established, subscribing to orders...");
-                                        self.subscribe_to_orders(OrderType::Buy, &mut ws_stream)
-                                            .await?;
-                                        self.subscribe_to_orders(OrderType::Sell, &mut ws_stream)
-                                            .await?;
-                                        initialized = true;
-                                    }
-                                }
-                                "data" => {
-                                    last_real_data_time = Instant::now();
+            })
+            .to_string();
 
-                                    if let Some(payload) = response.payload {
-                                        if let Some(orders) = payload.data.active_buy_order {
-                                            for order_indexer in orders {
-                                                let spot_order =
-                                                    SpotOrder::from_indexer_envio(order_indexer)?;
-                                                sender
-                                                    .send(OrderManagerMessage::AddOrder(spot_order))
+            {
+                let mut client_lock = client.lock().await;  
+                client_lock.send(Message::Text(start_msg)).await.map_err(|e| {
+                    error!("Failed to send paginated query for {:?}: {:?}", order_type, e);
+                    e
+                })?;
+            }
+
+            let response = {
+                let mut client_lock = client.lock().await;  
+                client_lock.next().await
+            };
+
+            if let Some(response) = response {
+                match response {
+                    Ok(Message::Text(text)) => {
+                        info!("Received response for historical {:?} orders with offset {}: {}", order_type, offset, text);
+                        if let Ok(parsed_response) = serde_json::from_str::<WebSocketResponseEnvio>(&text) {
+                            if let Some(payload) = parsed_response.payload {
+                                let orders_to_process = match order_type {
+                                    OrderType::Buy => payload.data.active_buy_order.unwrap_or_default(),
+                                    OrderType::Sell => payload.data.active_sell_order.unwrap_or_default(),
+                                };
+
+                                if orders_to_process.is_empty() {
+                                    info!("No more historical orders found for {:?}", order_type);
+                                    break;
+                                }
+
+                                
+                                for order in orders_to_process {
+                                    let order_status = order.status.clone();
+                                    match SpotOrder::from_indexer_envio(order) {
+                                        Ok(spot_order) => {
+                                            if let Some(status) = order_status {
+                                                if status == "Active" {
+                                                    sender.send(OrderManagerMessage::AddOrder(spot_order))
+                                                        .await
+                                                        .map_err(|_| Error::OrderManagerSendError)?;
+                                                } else {
+                                                    info!("Skipping non-active order with ID: {}", spot_order.id);
+                                                }
+                                            } else {
+                                                sender.send(OrderManagerMessage::AddOrder(spot_order))
                                                     .await
                                                     .map_err(|_| Error::OrderManagerSendError)?;
                                             }
                                         }
-                                        if let Some(orders) = payload.data.active_sell_order {
-                                            for order_indexer in orders {
-                                                let spot_order =
-                                                    SpotOrder::from_indexer_envio(order_indexer)?;
-                                                sender
-                                                    .send(OrderManagerMessage::AddOrder(spot_order))
-                                                    .await
-                                                    .map_err(|_| Error::OrderManagerSendError)?;
-                                            }
-                                        }
+                                        Err(e) => error!("Failed to convert order: {:?}", e),
                                     }
                                 }
-                                _ => {}
+                                offset += limit; 
                             }
                         } else {
-                            error!("Failed to deserialize WebSocketResponse: {:?}", text);
+                            error!("Failed to parse WebSocket response: {:?}", text);
                         }
                     }
-                    Ok(_) => {}
+                    Ok(_) => warn!("Received non-text message during synchronization for {:?}", order_type),
                     Err(e) => {
-                        error!("Error in websocket connection: {:?}", e);
+                        error!("Error during synchronization for {:?}: {:?}", order_type, e);
                         break;
                     }
                 }
             }
-
-            self.unsubscribe_orders(&mut ws_stream, OrderType::Buy)
-                .await?;
-            self.unsubscribe_orders(&mut ws_stream, OrderType::Sell)
-                .await?;
-
-            tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
         }
+
+        Ok(())
     }
 
-    async fn connect_to_ws(
-        &self,
-    ) -> Result<WebSocketStream<MaybeTlsStream<TcpStream>>, Box<dyn std::error::Error>> {
-        match connect_async(&self.url).await {
-            Ok((ws_stream, response)) => {
-                info!(
-                    "WebSocket handshake has been successfully completed with response: {:?}",
-                    response
-                );
-                Ok(ws_stream)
-            }
-            Err(e) => {
-                error!("Failed to establish websocket connection: {:?}", e);
-                Err(Box::new(e))
-            }
-        }
-    }
-
-    async fn subscribe_to_orders(
+    async fn subscribe_to_updates(
         &self,
         order_type: OrderType,
-        client: &mut WebSocketStream<MaybeTlsStream<TcpStream>>,
+        client: Arc<Mutex<WebSocketStream<MaybeTlsStream<TcpStream>>>>, 
+        sender: mpsc::Sender<OrderManagerMessage>,
     ) -> Result<(), Error> {
-        let subscription_query = format_graphql_subscription(order_type);
-        let start_msg = serde_json::json!({
-            "id": format!("{}", order_type as u8),
+            let subscription_query = format_graphql_pagination_subscription(order_type, 0, 0); 
+
+            let start_msg = serde_json::json!({
+                "id": format!("{}", order_type as u8),  
             "type": "start",
             "payload": {
                 "query": subscription_query
@@ -149,10 +225,78 @@ impl WebSocketClientEnvio {
         })
         .to_string();
 
-        client.send(Message::Text(start_msg)).await.map_err(|e| {
-            error!("Failed to send subscription: {:?}", e);
-            e
-        })?;
+        {
+            let mut client_lock = client.lock().await;  
+            client_lock.send(Message::Text(start_msg)).await.map_err(|e| {
+                error!("Failed to send subscription query for {:?}: {:?}", order_type, e);
+                e
+            })?;
+        }
+
+        let mut last_real_data_time = Instant::now();
+
+
+        loop {
+            if Instant::now().duration_since(last_real_data_time) > tokio::time::Duration::from_secs(30) {
+
+                error!("No real data received for 30 seconds, reconnecting...");
+                return Err(Error::EnvioWebsocketConnectionTimeoutError);
+            }
+
+            let response = {
+                let mut client_lock = client.lock().await;  
+                client_lock.next().await
+            };
+
+            if let Some(response) = response {
+                match response {
+                    Ok(Message::Text(text)) => {
+                        info!("Received WebSocket update for {:?}: {:?}", order_type, text);
+                        if let Ok(parsed_response) = serde_json::from_str::<WebSocketResponseEnvio>(&text) {
+                            
+                            if let Some(payload) = parsed_response.payload {
+                                let orders_to_process = match order_type {
+                                    OrderType::Buy => payload.data.active_buy_order.unwrap_or_default(),
+                                    OrderType::Sell => payload.data.active_sell_order.unwrap_or_default(),
+                                };
+
+                                
+                                for order in orders_to_process {
+                                    let order_status = order.status.clone();
+                                    match SpotOrder::from_indexer_envio(order) {
+                                        Ok(spot_order) => {
+                                            if let Some(status) = order_status{
+                                                if status == "Active" {
+                                                    sender.send(OrderManagerMessage::AddOrder(spot_order))
+                                                        .await
+                                                        .map_err(|_| Error::OrderManagerSendError)?;
+                                                } else {
+                                                    info!("Skipping non-active order with ID: {}", spot_order.id);
+                                                }
+                                            } else {
+                                                sender.send(OrderManagerMessage::AddOrder(spot_order))
+                                                    .await
+                                                    .map_err(|_| Error::OrderManagerSendError)?;
+                                            }
+                                        }
+                                        Err(e) => error!("Failed to convert order: {:?}", e),
+                                    }
+                                }
+                                last_real_data_time = Instant::now(); 
+                            }
+                        } else {
+                            error!("Failed to parse WebSocket response: {:?}", text);
+                        }
+                    }
+                    Ok(_) => warn!("Received non-text message for {:?}", order_type),
+                    Err(e) => {
+                        error!("WebSocket subscription error for {:?}: {:?}", order_type, e);
+                        break;
+                    }
+                }
+            }
+        }
+
         Ok(())
     }
 
@@ -171,5 +315,14 @@ impl WebSocketClientEnvio {
             e
         })?;
         Ok(())
+    }
+
+    
+    async fn connect_to_ws(&self) -> Result<WebSocketStream<MaybeTlsStream<TcpStream>>, Error> {
+        let (ws_stream, _) = connect_async(&self.url).await.map_err(|e| {
+            error!("Failed to connect to WebSocket: {:?}", e);
+            Error::EnvioWebsocketConnectionError
+        })?;
+        Ok(ws_stream)
     }
 }

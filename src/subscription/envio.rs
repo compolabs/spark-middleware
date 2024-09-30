@@ -1,4 +1,39 @@
 use crate::{config::env::ev, indexer::spot_order::OrderType};
+use log::info;
+
+pub fn format_graphql_pagination_subscription(
+    order_type: OrderType,
+    offset: u64,
+    limit: u64,
+) -> String {
+    let order_type_str = match order_type {
+        OrderType::Sell => "ActiveSellOrder",
+        OrderType::Buy => "ActiveBuyOrder",
+    };
+
+    let a = format!(
+        r#"query {{
+            {}(
+                limit: {},
+                offset: {},
+                order_by: {{ timestamp: asc }} 
+            ) {{
+                id
+                user
+                timestamp
+                order_type
+                amount
+                asset
+                price
+            }}
+        }}"#,
+        order_type_str, limit, offset
+    );
+    info!("DEBUG ______________________________");
+    info!("{:?}", a);
+    info!("DEBUG ______________________________");
+    a
+}
 
 pub fn format_graphql_subscription(order_type: OrderType) -> String {
     let limit = ev("FETCH_ORDER_LIMIT").unwrap_or_default();
@@ -49,5 +84,23 @@ pub fn format_graphql_subscription_old(order_type: OrderType) -> String {
             }}
         }}"#,
         limit, order_type_str, order_by
+    )
+}
+
+pub fn format_graphql_count_query(order_type: OrderType) -> String {
+    let order_type_str = match order_type {
+        OrderType::Sell => "ActiveSellOrder",
+        OrderType::Buy => "ActiveBuyOrder",
+    };
+
+    format!(
+        r#"query {{
+            {}_aggregate {{
+                aggregate {{
+                    count
+                }}
+            }}
+        }}"#,
+        order_type_str
     )
 }
