@@ -10,6 +10,16 @@ pub enum OrderType {
     Sell,
 }
 
+#[derive(Debug, PartialEq, Eq, Clone, Copy, JsonSchema, Serialize, Deserialize)]
+pub enum OrderStatus {
+    New,
+    InProgress,
+    PartiallyFilled,
+    Filled,
+    Cancelled,
+    Failed,
+}
+
 #[derive(Debug, Clone, JsonSchema, Serialize, Deserialize, Eq)]
 pub struct SpotOrder {
     pub id: String,
@@ -19,6 +29,7 @@ pub struct SpotOrder {
     pub price: u128,
     pub timestamp: u64,
     pub order_type: OrderType,
+    pub status: Option<OrderStatus>,
 }
 
 impl PartialEq for SpotOrder {
@@ -83,6 +94,7 @@ impl SpotOrder {
             price,
             timestamp,
             order_type: intermediate.order_type,
+            status: Some(OrderStatus::New),
         })
     }
 
@@ -105,6 +117,7 @@ impl SpotOrder {
             price,
             timestamp,
             order_type,
+            status: Some(OrderStatus::New),
         })
     }
 }
@@ -114,6 +127,12 @@ pub struct OrderPayloadSubsquid {
     pub active_buy_orders: Option<Vec<SubsquidOrder>>,
     pub active_sell_orders: Option<Vec<SubsquidOrder>>,
 }
+/*
+#[derive(Debug, Clone, Deserialize)]
+pub struct OrderPayloadEnvio {
+    pub Order: Option<Vec<SpotOrderEnvio>>,
+}
+*/
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct OrderPayloadEnvio {

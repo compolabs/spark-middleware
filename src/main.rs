@@ -12,6 +12,7 @@ use matchers::websocket::MatcherWebSocket;
 use metrics::types::OrderMetrics;
 use middleware::aggregator::Aggregator;
 use middleware::manager::OrderManager;
+use middleware::order_pool::{generate_price_time_ranges, ShardedOrderPool};
 use std::{collections::HashMap, sync::Arc};
 use tokio::net::TcpListener;
 use tokio::sync::Mutex;
@@ -39,9 +40,6 @@ async fn main() -> Result<(), Error> {
     let matcher_manager = Arc::new(Mutex::new(MatcherManager::new()));
 
     let mut order_managers: HashMap<String, Arc<OrderManager>> = HashMap::new();
-
-
-
 
     let order_metrics = Arc::new(Mutex::new(OrderMetrics::load_from_file()));
 
@@ -84,11 +82,13 @@ async fn main() -> Result<(), Error> {
     ));
     tasks.push(rocket_task);
 
+    let envio_manager = order_managers.get("envio").expect("Envio manager not found");
+
     let matcher_task = tokio::spawn(run_matcher_server(
         settings.clone(),
-        aggregator,
+        Arc::clone(&envio_manager.order_pool),
         matcher_manager.clone(),
-        order_metrics 
+        order_metrics,
     ));
     tasks.push(matcher_task);
 
@@ -111,16 +111,15 @@ async fn main() -> Result<(), Error> {
 async fn initialize_envio_indexer(
     settings: Arc<Settings>,
     tasks: &mut Vec<tokio::task::JoinHandle<()>>,
-    order_managers: &mut HashMap<String, Arc<OrderManager>>, 
+    order_managers: &mut HashMap<String, Arc<OrderManager>>,
 ) -> Result<(), Error> {
     let ws_url_envio = Url::parse(&settings.websockets.envio_url)?;
-    let websocket_client_envio = Arc::new(WebSocketClientEnvio::new(ws_url_envio)); 
+    let websocket_client_envio = Arc::new(WebSocketClientEnvio::new(ws_url_envio));
 
     let (tx, mut rx) = mpsc::channel(100);
 
-    
     let ws_task_envio = {
-        let websocket_client_envio = Arc::clone(&websocket_client_envio); 
+        let websocket_client_envio = Arc::clone(&websocket_client_envio);
         tokio::spawn(async move {
             if let Err(e) = websocket_client_envio.connect(tx).await {
                 eprintln!("WebSocket envio error: {}", e);
@@ -128,11 +127,12 @@ async fn initialize_envio_indexer(
         })
     };
 
-    let order_manager_envio = OrderManager::new(); 
-    order_managers.insert("envio".to_string(), order_manager_envio.clone()); 
+    let price_time_ranges = generate_price_time_ranges(); //NTD Debug logic
+    let order_manager_envio = OrderManager::new(price_time_ranges);
+    order_managers.insert("envio".to_string(), order_manager_envio.clone());
 
     let manager_task_envio = {
-        let order_manager_envio = Arc::clone(&order_manager_envio); 
+        let order_manager_envio = Arc::clone(&order_manager_envio);
         tokio::spawn(async move {
             while let Some(message) = rx.recv().await {
                 order_manager_envio.handle_message(message).await;
@@ -161,7 +161,8 @@ async fn initialize_subsquid_indexer(
         }
     });
 
-    let order_manager_subsquid = OrderManager::new();
+    let price_time_ranges = generate_price_time_ranges(); //NTD Debug logic
+    let order_manager_subsquid = OrderManager::new(price_time_ranges);
     order_managers.insert("subsquid".to_string(), order_manager_subsquid.clone());
 
     let manager_task_subsquid = tokio::spawn(async move {
@@ -187,7 +188,8 @@ async fn initialize_superchain_indexer(
         }
     });
 
-    let order_manager_superchain = OrderManager::new();
+    let price_time_ranges = generate_price_time_ranges(); //NTD Debug logic
+    let order_manager_superchain = OrderManager::new(price_time_ranges);
     order_managers.insert("superchain".to_string(), order_manager_superchain.clone());
 
     let manager_task_superchain = tokio::spawn(async move {
@@ -205,22 +207,22 @@ async fn run_rocket_server(
     order_managers: HashMap<String, Arc<OrderManager>>,
     aggregator: Arc<Aggregator>,
     settings: Arc<Settings>,
-    metrics: Arc<Mutex<OrderMetrics>>
+    metrics: Arc<Mutex<OrderMetrics>>,
 ) {
-    let rocket = rocket(order_managers, aggregator, settings,metrics);
+    let rocket = rocket(order_managers, aggregator, settings, metrics);
     let _ = rocket.launch().await;
 }
 
 async fn run_matcher_server(
     settings: Arc<Settings>,
-    aggregator: Arc<Aggregator>,
+    order_pool: Arc<ShardedOrderPool>, 
     matcher_manager: Arc<Mutex<MatcherManager>>,
     metrics: Arc<Mutex<OrderMetrics>>,
 ) {
     let listener = TcpListener::bind(&settings.matchers.matcher_ws_url)
         .await
         .unwrap(); // NTD unwrap
-    let matcher_websocket = Arc::new(MatcherWebSocket::new(settings.clone(),metrics.clone()));
+    let matcher_websocket = Arc::new(MatcherWebSocket::new(settings.clone(), metrics.clone()));
 
     info!(
         "Matcher WebSocket server started at {}",
@@ -233,13 +235,13 @@ async fn run_matcher_server(
             .expect("Error during WebSocket handshake");
 
         let matcher_websocket = Arc::clone(&matcher_websocket);
-        let aggregator_clone = Arc::clone(&aggregator);
+        let order_pool_clone = Arc::clone(&order_pool); // Передаем ордер пул
         let matcher_manager_clone = Arc::clone(&matcher_manager);
 
         let (tx, _) = mpsc::channel(100);
         tokio::spawn(async move {
             matcher_websocket
-                .handle_connection(ws_stream, tx, aggregator_clone, matcher_manager_clone)
+                .handle_connection(ws_stream, tx, order_pool_clone, matcher_manager_clone)
                 .await;
         });
     }

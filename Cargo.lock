@@ -6890,6 +6890,7 @@ dependencies = [
  "tokio-tungstenite 0.17.2",
  "toml 0.5.11",
  "url",
+ "uuid 1.10.0",
 ]
 
 [[package]]

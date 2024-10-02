@@ -15,6 +15,12 @@ use crate::indexer::spot_order::{OrderType, SpotOrder};
 use crate::metrics::types::OrderMetrics;
 use crate::middleware::aggregator::Aggregator;
 use crate::middleware::manager::OrderManager;
+use crate::middleware::order_pool::{PriceTimeRange, ShardDetails, ShardOrdersDetailedResponse};
+
+#[derive(Serialize, JsonSchema)]
+pub struct ShardOrdersCountResponse {
+    pub shard_order_counts: Vec<usize>,
+}
 
 #[derive(Serialize, JsonSchema)]
 pub struct MetricsResponse {
@@ -109,7 +115,6 @@ async fn get_buy_orders(
     managers: &State<HashMap<String, Arc<OrderManager>>>,
 ) -> Option<Json<OrdersResponse>> {
     if let Some(manager) = managers.get(indexer.as_str()) {
-        
         let buy_orders = manager.order_pool.get_best_buy_orders();
         return Some(Json(OrdersResponse { orders: buy_orders }));
     }
@@ -123,7 +128,6 @@ async fn get_sell_orders(
     managers: &State<HashMap<String, Arc<OrderManager>>>,
 ) -> Option<Json<OrdersResponse>> {
     if let Some(manager) = managers.get(indexer.as_str()) {
-        
         let sell_orders = manager.order_pool.get_best_sell_orders();
         return Some(Json(OrdersResponse {
             orders: sell_orders,
@@ -214,6 +218,61 @@ async fn get_aggregated_spread(aggregator: &State<Arc<Aggregator>>) -> Json<Spre
     })
 }
 
+#[openapi]
+#[get("/orders/<indexer>/shard-details")]
+async fn get_shard_order_details(
+    indexer: Indexer,
+    managers: &State<HashMap<String, Arc<OrderManager>>>,
+) -> Option<Json<ShardOrdersDetailedResponse>> {
+    if let Some(manager) = managers.get(indexer.as_str()) {
+        let shard_details = manager.order_pool.get_detailed_order_info_per_shard();
+        let total_buy_orders = shard_details
+            .iter()
+            .map(|shard| shard.buy_orders_count)
+            .sum();
+        let total_sell_orders = shard_details
+            .iter()
+            .map(|shard| shard.sell_orders_count)
+            .sum();
+
+        return Some(Json(ShardOrdersDetailedResponse {
+            shard_details,
+            total_buy_orders,
+            total_sell_orders,
+        }));
+    }
+    None
+}
+
+#[openapi]
+#[get("/aggregated/orders/shard-details")]
+async fn get_aggregated_shard_order_details(
+    aggregator: &State<Arc<Aggregator>>,
+) -> Json<ShardOrdersDetailedResponse> {
+    let mut aggregated_shard_details = Vec::new();
+    let mut total_buy_orders = 0;
+    let mut total_sell_orders = 0;
+
+    for manager in aggregator.order_managers.values() {
+        let shard_details = manager.order_pool.get_detailed_order_info_per_shard();
+        total_buy_orders += shard_details
+            .iter()
+            .map(|shard| shard.buy_orders_count)
+            .sum::<usize>();
+        total_sell_orders += shard_details
+            .iter()
+            .map(|shard| shard.sell_orders_count)
+            .sum::<usize>();
+        aggregated_shard_details.extend(shard_details);
+    }
+
+    Json(ShardOrdersDetailedResponse {
+        shard_details: aggregated_shard_details,
+        total_buy_orders,
+        total_sell_orders,
+    })
+}
+
 pub fn get_routes() -> Vec<Route> {
     openapi_get_routes![
         get_buy_orders,
@@ -223,7 +282,9 @@ pub fn get_routes() -> Vec<Route> {
         get_indexer_spread,
         get_aggregated_spread,
         get_orders_count,
-        get_metrics
+        get_metrics,
+        get_shard_order_details,
+        get_aggregated_shard_order_details,
     ]
 }
 

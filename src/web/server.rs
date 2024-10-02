@@ -27,9 +27,9 @@ pub fn rocket(
         .manage(order_managers)
         .manage(aggregator)
         .manage(metrics)
- //       .manage(create_schema())
+        //       .manage(create_schema())
         .mount("/", get_routes())
-//        .mount("/graphql", routes![graphql_query, graphql_request])
-//        .mount("/graphiql", routes![graphiql])
+        //        .mount("/graphql", routes![graphql_query, graphql_request])
+        //        .mount("/graphiql", routes![graphiql])
         .mount("/swagger", make_swagger_ui(&get_docs()))
 }

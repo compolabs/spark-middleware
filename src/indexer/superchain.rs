@@ -9,6 +9,7 @@ use tokio::sync::mpsc;
 
 use crate::config::settings::Settings;
 use crate::error::Error;
+use crate::indexer::spot_order::OrderStatus;
 use crate::indexer::spot_order::OrderType;
 use crate::indexer::spot_order::SpotOrder;
 use crate::middleware::manager::OrderManagerMessage;
@@ -53,14 +54,14 @@ pub async fn start_superchain_indexer(
 
     info!("Superchain ws client created. Trying to connect");
 
-    let batch_size = 1000; 
-    let mut current_block = 0; 
-    let max_block = 10_000; 
+    let batch_size = 1000;
+    let mut current_block = 0;
+    let max_block = 10_000;
 
     while current_block < max_block {
         let request = GetSparkOrderRequest {
-            from_block: Bound::Exact(current_block), 
-            to_block: Bound::Exact(current_block + batch_size), 
+            from_block: Bound::Exact(current_block),
+            to_block: Bound::Exact(current_block + batch_size),
             ..Default::default()
         };
 
@@ -76,7 +77,6 @@ pub async fn start_superchain_indexer(
                     let data_str = String::from_utf8(valid_data).unwrap();
                     let superchain_order: SuperchainOrder = serde_json::from_str(&data_str)?;
 
-                    
                     match superchain_order.state_type.as_str() {
                         "Open" => {
                             if let (Some(amount), Some(price), Some(order_type), Some(user)) = (
@@ -105,6 +105,7 @@ pub async fn start_superchain_indexer(
                                         .unwrap()
                                         .as_secs(),
                                     order_type: order_type_enum,
+                                    status: Some(OrderStatus::New),
                                 };
 
                                 info!("Sending Open Order to manager: {:?}", spot_order);
@@ -118,6 +119,10 @@ pub async fn start_superchain_indexer(
                         "Match" | "Cancel" => {
                             let order_id = superchain_order.order_id.clone();
                             let price = superchain_order.price.unwrap_or_default();
+                            let t_placeholder = SystemTime::now()
+                                .duration_since(UNIX_EPOCH)
+                                .unwrap()
+                                .as_secs(); // NTD REWORK
 
                             if let Some(order_type_str) = superchain_order.order_type.as_deref() {
                                 let order_type_enum = match order_type_str {
@@ -141,6 +146,7 @@ pub async fn start_superchain_indexer(
                                     order_id,
                                     price,
                                     order_type: order_type_enum,
+                                    timestamp: t_placeholder,
                                 };
 
                                 if let Err(e) = sender.send(remove_message).await {
@@ -159,12 +165,14 @@ pub async fn start_superchain_indexer(
                                     order_id: order_id.clone(),
                                     price,
                                     order_type: OrderType::Buy,
+                                    timestamp: t_placeholder,
                                 };
 
                                 let remove_sell_message = OrderManagerMessage::RemoveOrder {
                                     order_id,
                                     price,
                                     order_type: OrderType::Sell,
+                                    timestamp: t_placeholder,
                                 };
 
                                 if let Err(e) = sender.send(remove_buy_message).await {
@@ -193,10 +201,8 @@ pub async fn start_superchain_indexer(
             }
         }
 
-        
         current_block += batch_size;
 
-        
         tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
     }
 

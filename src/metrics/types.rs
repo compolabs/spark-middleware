@@ -1,16 +1,16 @@
+use chrono::{DateTime, Utc};
+use log::{error, info};
+use serde::{Deserialize, Serialize};
 use std::fs;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
-use chrono::{DateTime, Utc};
-use serde::{Deserialize, Serialize};
-use log::{info, error};
 
 #[derive(Serialize, Deserialize, Default, Debug)]
 pub struct OrderMetrics {
     pub total_matched: u64,
     pub total_remaining: u64,
     pub matched_per_second: f64,
-    pub last_update: Option<DateTime<Utc>>, 
+    pub last_update: Option<DateTime<Utc>>,
     pub match_count: u64,
 }
 
@@ -31,7 +31,10 @@ impl OrderMetrics {
         self.match_count += matched_count;
 
         if let Some(last) = self.last_update {
-            let duration = Utc::now().signed_duration_since(last).to_std().unwrap_or(Duration::new(0, 0));
+            let duration = Utc::now()
+                .signed_duration_since(last)
+                .to_std()
+                .unwrap_or(Duration::new(0, 0));
             if duration.as_secs() > 0 {
                 self.matched_per_second = self.match_count as f64 / duration.as_secs_f64();
                 self.match_count = 0;

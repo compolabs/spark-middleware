@@ -125,7 +125,7 @@ impl Aggregator {
 
     pub async fn remove_matched_orders(&self, matched_order_ids: Vec<String>) {
         for manager in self.order_managers.values() {
-            manager.order_pool.clear_orders(); 
+            manager.order_pool.clear_orders();
         }
         info!("Matched orders removed from the collections.");
     }
@@ -174,7 +174,6 @@ impl Aggregator {
         matches
     }
 
-
     pub async fn select_matching_batches(
         &self,
         batch_size: usize,
@@ -184,8 +183,11 @@ impl Aggregator {
 
         let (buy_orders, sell_orders) = self.get_all_orders_without_type_tuple().await;
 
-        
-        info!("Found {} buy orders and {} sell orders for matching", buy_orders.len(), sell_orders.len());
+        info!(
+            "Found {} buy orders and {} sell orders for matching",
+            buy_orders.len(),
+            sell_orders.len()
+        );
 
         buy_queue.extend(buy_orders.into_iter());
         sell_queue.extend(sell_orders.into_iter().map(Reverse));
@@ -215,7 +217,10 @@ impl Aggregator {
                     batches.push(std::mem::take(&mut matches));
                 }
             } else {
-                info!("No match for buy order at price {} and sell order at price {}", buy_order.price, sell_order.price);
+                info!(
+                    "No match for buy order at price {} and sell order at price {}",
+                    buy_order.price, sell_order.price
+                );
                 sell_queue.push(Reverse(sell_order));
             }
         }
