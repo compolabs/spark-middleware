@@ -194,10 +194,6 @@ impl WebSocketClientEnvio {
             if let Some(response) = response {
                 match response {
                     Ok(Message::Text(text)) => {
-                        info!(
-                            "Received response for historical {:?} orders with offset {}: {}",
-                            order_type, offset, text
-                        );
                         if let Ok(parsed_response) =
                             serde_json::from_str::<WebSocketResponseEnvio>(&text)
                         {
@@ -214,6 +210,10 @@ impl WebSocketClientEnvio {
                                 if orders_to_process.is_empty() {
                                     info!("No more historical orders found for {:?}", order_type);
                                     break;
+                                } else {
+                                    info!(
+                                        "Received response for historical {:?} orders with offset {}: {}",
+                                        order_type, offset, orders_to_process.len());
                                 }
                                 total_orders_received += orders_to_process.len();
 
@@ -223,6 +223,7 @@ impl WebSocketClientEnvio {
                                         Ok(spot_order) => {
                                             if let Some(status) = order_status {
                                                 if status == "Active" {
+                                                    info!("!!!!Sending sport order {:?}", &spot_order);
                                                     sender
                                                         .send(OrderManagerMessage::AddOrder(
                                                             spot_order,

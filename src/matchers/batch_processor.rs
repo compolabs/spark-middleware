@@ -18,36 +18,36 @@ use tokio_tungstenite::{tungstenite::protocol::Message, WebSocketStream};
 use super::types::{MatcherRequest, MatcherResponseWrapper};
 use uuid::Uuid;
 
-/// Статус батча для отслеживания его состояния.
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum BatchStatus {
-    Pending,    // Батч готовится к отправке
-    InFlight,   // Батч отправлен и ожидает ответа
-    Matched,    // Батч успешно исполнен
-    Failed,     // Произошла ошибка при исполнении батча
+    Pending,    
+    InFlight,   
+    Matched,    
+    Failed,     
 }
 
-/// Структура батча, содержащая buy и sell ордера и статус выполнения.
+
 #[derive(Debug, Clone)]
 pub struct Batch {
-    pub id: String,                 // Уникальный идентификатор батча
-    pub buy_orders: Vec<SpotOrder>, // Список ордеров на покупку
-    pub sell_orders: Vec<SpotOrder>, // Список ордеров на продажу
-    pub status: BatchStatus,        // Текущий статус батча
+    pub id: String,                 
+    pub buy_orders: Vec<SpotOrder>, 
+    pub sell_orders: Vec<SpotOrder>, 
+    pub status: BatchStatus,        
 }
 
 impl Batch {
-    /// Создание нового батча с уникальным идентификатором.
+    
     pub fn new(buy_orders: Vec<SpotOrder>, sell_orders: Vec<SpotOrder>) -> Self {
         Batch {
-            id: Uuid::new_v4().to_string(), // Уникальный идентификатор
+            id: Uuid::new_v4().to_string(), 
             buy_orders,
             sell_orders,
-            status: BatchStatus::Pending,   // Начальный статус - Pending
+            status: BatchStatus::Pending,   
         }
     }
 
-    /// Проверка, что батч пустой (если нет ордеров на покупку или продажу).
+    
     pub fn is_empty(&self) -> bool {
         self.buy_orders.is_empty() || self.sell_orders.is_empty()
     }
@@ -56,11 +56,11 @@ impl Batch {
 pub struct BatchProcessor {
     pub settings: Arc<Settings>,
     pub metrics_handler: MetricsHandler,
-    pub busy: Arc<Mutex<bool>>, // Для контроля занятости процессора батчей
+    pub busy: Arc<Mutex<bool>>, 
 }
 
 impl BatchProcessor {
-    /// Создание нового `BatchProcessor`.
+    
     pub fn new(settings: Arc<Settings>, metrics_handler: MetricsHandler) -> Arc<Self> {
         Arc::new(Self {
             settings,
@@ -69,17 +69,17 @@ impl BatchProcessor {
         })
     }
 
-    /// Метод для отправки батча на матчеры.
+    
     async fn send_batch_to_matcher(
         &self,
         ws_stream: Arc<Mutex<WebSocketStream<TcpStream>>>,
         batch: Vec<SpotOrder>,
     ) -> Result<(), Box<dyn std::error::Error>> {
-        let request = MatcherRequest::Orders(batch); // Формируем запрос для матчера
+        let request = MatcherRequest::Orders(batch); 
         let request_text = serde_json::to_string(&request)?;
 
         let mut ws_stream_lock = ws_stream.lock().await;
-        ws_stream_lock.send(Message::Text(request_text)).await?; // Отправляем запрос
+        ws_stream_lock.send(Message::Text(request_text)).await?; 
 
         Ok(())
     }
@@ -93,9 +93,9 @@ impl BatchProcessor {
         while let Some(message) = ws_stream_lock.next().await {
             match message {
                 Ok(Message::Text(text)) => {
-                    // Попытка десериализовать ответ в структуру MatcherResponse
+                    
                     if let Ok(response) = serde_json::from_str::<MatcherResponse>(&text) {
-                        return Some(response); // Возвращаем ответ от матчера
+                        return Some(response); 
                     } else {
                         error!("Failed to parse message into MatcherResponse");
                     }
@@ -114,13 +114,13 @@ impl BatchProcessor {
         uuid: String,
         ws_stream: Arc<Mutex<WebSocketStream<TcpStream>>>,
         sender: mpsc::Sender<String>,
-        order_pool: Arc<ShardedOrderPool>, // Используем пул ордеров
+        order_pool: Arc<ShardedOrderPool>, 
         matcher_manager: Arc<Mutex<MatcherManager>>,
     ) {
         let batch_size = 20;
 
         loop {
-            // Проверяем количество активных батчей
+            
             let active_batches = {
                 let manager = matcher_manager.lock().await;
                 manager.get_active_batches(&uuid)
@@ -131,7 +131,7 @@ impl BatchProcessor {
                 continue;
             }
 
-            // Формируем батчи из ордеров, используя пул
+            
             let batch_to_process = order_pool.select_batches(batch_size).await;
 
             if batch_to_process.is_empty() {
@@ -176,15 +176,15 @@ impl BatchProcessor {
         }
     }
 
-    /// Обработка одного батча: отправка и получение ответа.
+    
     async fn process_single_batch(
         &self,
         ws_stream: Arc<Mutex<WebSocketStream<TcpStream>>>,
         sender: mpsc::Sender<String>,
-        order_pool: Arc<ShardedOrderPool>, // Передаем пул ордеров
+        order_pool: Arc<ShardedOrderPool>, 
         matcher_manager: Arc<Mutex<MatcherManager>>,
         uuid: String,
-        batch: Batch, // Теперь передаем наш новый тип Batch
+        batch: Batch, 
     ) -> Result<(), Error> {
         let flat_batch: Vec<SpotOrder> = batch
             .buy_orders
@@ -194,15 +194,15 @@ impl BatchProcessor {
 
         info!("Sending batch of {} orders to matcher {}", flat_batch.len(), uuid);
 
-        // Отправляем батч на матчер
+        
         if let Err(e) = self.send_batch_to_matcher(ws_stream.clone(), flat_batch).await {
             error!("Failed to send batch to matcher {}: {}", uuid, e);
             return Err(Error::SendingToMatcherError);
         }
 
-        // Ожидаем ответ от матчера
+        
         if let Some(response) = self.receive_matcher_response(ws_stream.clone()).await {
-            // Предполагаем, что response содержит вектор MatcherOrderUpdate
+            
             order_pool.update_order_status(response.orders).await;
 
             /*

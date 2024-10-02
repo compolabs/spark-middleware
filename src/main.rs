@@ -127,7 +127,7 @@ async fn initialize_envio_indexer(
         })
     };
 
-    let price_time_ranges = generate_price_time_ranges(); //NTD Debug logic
+    let price_time_ranges = generate_price_time_ranges(); 
     let order_manager_envio = OrderManager::new(price_time_ranges);
     order_managers.insert("envio".to_string(), order_manager_envio.clone());
 
@@ -161,7 +161,7 @@ async fn initialize_subsquid_indexer(
         }
     });
 
-    let price_time_ranges = generate_price_time_ranges(); //NTD Debug logic
+    let price_time_ranges = generate_price_time_ranges(); 
     let order_manager_subsquid = OrderManager::new(price_time_ranges);
     order_managers.insert("subsquid".to_string(), order_manager_subsquid.clone());
 
@@ -188,7 +188,7 @@ async fn initialize_superchain_indexer(
         }
     });
 
-    let price_time_ranges = generate_price_time_ranges(); //NTD Debug logic
+    let price_time_ranges = generate_price_time_ranges(); 
     let order_manager_superchain = OrderManager::new(price_time_ranges);
     order_managers.insert("superchain".to_string(), order_manager_superchain.clone());
 
@@ -221,7 +221,7 @@ async fn run_matcher_server(
 ) {
     let listener = TcpListener::bind(&settings.matchers.matcher_ws_url)
         .await
-        .unwrap(); // NTD unwrap
+        .unwrap(); 
     let matcher_websocket = Arc::new(MatcherWebSocket::new(settings.clone(), metrics.clone()));
 
     info!(
@@ -235,7 +235,7 @@ async fn run_matcher_server(
             .expect("Error during WebSocket handshake");
 
         let matcher_websocket = Arc::clone(&matcher_websocket);
-        let order_pool_clone = Arc::clone(&order_pool); // Передаем ордер пул
+        let order_pool_clone = Arc::clone(&order_pool); 
         let matcher_manager_clone = Arc::clone(&matcher_manager);
 
         let (tx, _) = mpsc::channel(100);

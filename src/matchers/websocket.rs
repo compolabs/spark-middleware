@@ -30,7 +30,7 @@ impl MatcherWebSocket {
         self: Arc<Self>,
         ws_stream: WebSocketStream<TcpStream>,
         sender: mpsc::Sender<String>,
-        order_pool: Arc<ShardedOrderPool>, // Заменяем aggregator на пул
+        order_pool: Arc<ShardedOrderPool>, 
         matcher_manager: Arc<Mutex<MatcherManager>>,
     ) {
         let ws_stream = Arc::new(Mutex::new(ws_stream));
@@ -51,7 +51,7 @@ impl MatcherWebSocket {
                             let self_arc = self.clone();
                             let ws_stream_clone = ws_stream.clone();
                             let sender_clone = sender.clone();
-                            let order_pool_clone = Arc::clone(&order_pool); // Передаем пул ордеров
+                            let order_pool_clone = Arc::clone(&order_pool); 
 
                             tokio::spawn(async move {
                                 self_arc
@@ -59,7 +59,7 @@ impl MatcherWebSocket {
                                         uuid.clone(),
                                         ws_stream_clone,
                                         sender_clone,
-                                        order_pool_clone, // Пул ордеров передаем сюда
+                                        order_pool_clone, 
                                         matcher_manager,
                                     )
                                     .await;

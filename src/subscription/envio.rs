@@ -29,9 +29,6 @@ pub fn format_graphql_pagination_subscription(
         }}"#,
         order_type_str, limit, offset
     );
-    info!("DEBUG ______________________________");
-    info!("{:?}", a);
-    info!("DEBUG ______________________________");
     a
 }
 

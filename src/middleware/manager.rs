@@ -1,8 +1,7 @@
 use crate::indexer::spot_order::{OrderType, SpotOrder};
 use crate::middleware::order_pool::{PriceTimeRange, ShardedOrderPool};
-use log::info;
+use log::{debug, info};
 use std::sync::Arc;
-use tokio::sync::mpsc;
 
 #[derive(Debug)]
 pub enum OrderManagerMessage {
@@ -27,10 +26,11 @@ impl OrderManager {
         })
     }
 
+    
     pub async fn handle_message(&self, message: OrderManagerMessage) {
         match message {
             OrderManagerMessage::AddOrder(order) => {
-                self.order_pool.add_order(order);
+                self.add_order(order).await; 
             }
             OrderManagerMessage::RemoveOrder {
                 order_id,
@@ -38,21 +38,21 @@ impl OrderManager {
                 timestamp,
                 order_type,
             } => {
-                self.order_pool
-                    .remove_order(&order_id, price, timestamp, order_type);
+                self.remove_order(&order_id, price, timestamp, order_type)
+                    .await; 
             }
             OrderManagerMessage::ClearAndAddOrders(orders) => {
-                self.clear_and_add_orders(orders).await;
+                self.clear_and_add_orders(orders).await; 
             }
         }
     }
 
     pub async fn add_order(&self, order: SpotOrder) {
-        info!(
+        debug!(
             "Adding new order with id: {}, price: {}, timestamp: {}",
             order.id, order.price, order.timestamp
         );
-        self.order_pool.add_order(order);
+        self.order_pool.add_order(order).await; 
     }
 
     pub async fn remove_order(
@@ -63,24 +63,25 @@ impl OrderManager {
         order_type: OrderType,
     ) {
         self.order_pool
-            .remove_order(order_id, price, timestamp, order_type);
+            .remove_order(order_id, price, timestamp, order_type)
+            .await; 
         info!("Removed order with id: {}", order_id);
     }
 
     pub async fn clear_and_add_orders(&self, orders: Vec<SpotOrder>) {
-        self.order_pool.clear_orders();
+        self.order_pool.clear_orders(); 
         for order in orders {
-            self.order_pool.add_order(order);
+            self.order_pool.add_order(order).await; 
         }
         info!("Cleared and added new orders");
     }
 
     pub async fn get_buy_orders_count(&self) -> usize {
-        self.order_pool.get_best_buy_orders().len()
+        self.order_pool.get_best_buy_orders().len() 
     }
 
     pub async fn get_sell_orders_count(&self) -> usize {
-        self.order_pool.get_best_sell_orders().len()
+        self.order_pool.get_best_sell_orders().len() 
     }
 
     pub async fn get_total_orders_count(&self) -> usize {
@@ -88,7 +89,7 @@ impl OrderManager {
     }
 
     pub async fn clear_orders(&self) {
-        self.order_pool.clear_orders();
+        self.order_pool.clear_orders(); 
         info!("All orders have been cleared from OrderManager");
     }
 
@@ -99,7 +100,7 @@ impl OrderManager {
         order_type: OrderType,
     ) -> Vec<SpotOrder> {
         self.order_pool
-            .get_orders_by_price_and_time(price, timestamp, order_type)
+            .get_orders_by_price_and_time(price, timestamp, order_type) 
     }
 
     pub async fn log_orders(&self) {

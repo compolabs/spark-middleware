@@ -20,7 +20,7 @@ impl OrderShard {
         }
     }
 
-    /// Асинхронное добавление ордера в шард.
+    
     pub async fn add_order(&self, order: SpotOrder) {
         let price = order.price;
         let order_id = order.id.clone();
@@ -47,7 +47,7 @@ impl OrderShard {
         }
     }
 
-    /// Асинхронное удаление ордера из шарда.
+    
     pub async fn remove_order(&self, order_id: &str, price: u128, order_type: OrderType) {
         match order_type {
             OrderType::Buy => {
@@ -73,7 +73,7 @@ impl OrderShard {
         }
     }
 
-    /// Асинхронное обновление ордера (например, при частичном исполнении).
+    
     pub async fn update_order(
         &self,
         order_id: &str,
