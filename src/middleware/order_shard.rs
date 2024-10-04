@@ -220,5 +220,36 @@ impl OrderShard {
             .map(|entry| entry.value().len())
             .sum()
     }
+    
+    pub fn get_all_buy_orders(&self) -> Vec<SpotOrder> {
+        let mut orders = Vec::new();
+        for price_level in self.buy_orders_by_price.iter() {
+            for order in price_level.value().iter() {
+                orders.push(order.value().clone());
+            }
+        }
+        orders
+    }
+
+    pub fn get_all_sell_orders(&self) -> Vec<SpotOrder> {
+        let mut orders = Vec::new();
+        for price_level in self.sell_orders_by_price.iter() {
+            for order in price_level.value().iter() {
+                orders.push(order.value().clone());
+            }
+        }
+        orders
+    }
+
+    pub fn get_min_sell_price(&self) -> Option<u128> {
+        let sell_price_levels = self.sell_price_levels.lock().unwrap();
+        sell_price_levels.iter().next().cloned()
+    }
+
+
+    pub fn get_max_buy_price(&self) -> Option<u128> {
+        let buy_price_levels = self.buy_price_levels.lock().unwrap();
+        buy_price_levels.iter().next_back().cloned()
+    }
 
 }

@@ -2,6 +2,7 @@ use crate::indexer::spot_order::{OrderStatus, OrderType, SpotOrder};
 use crate::matchers::batch_processor::Batch;
 use crate::matchers::types::MatcherOrderUpdate;
 use crate::middleware::order_shard::OrderShard;
+use dashmap::DashMap;
 use log::info;
 use schemars::JsonSchema;
 use serde::Serialize;
@@ -198,64 +199,192 @@ impl ShardedOrderPool {
     pub async fn select_batches(&self, batch_size: usize) -> Vec<Batch> {
         let mut selected_batches = Vec::new();
 
-        
-        let mut all_buy_orders = Vec::new();
-        let mut all_sell_orders = Vec::new();
+        // Шаг 1: Собираем все ордера покупки и сортируем их по времени
+        let mut all_buy_orders = self.get_all_buy_orders();
+        all_buy_orders.sort_by(|a, b| a.timestamp.cmp(&b.timestamp));
 
-        for shard in &self.shards {
-            all_buy_orders.extend(shard.get_best_buy_orders());
-            all_sell_orders.extend(shard.get_best_sell_orders());
+        // Собираем все ордера продажи и сортируем их по времени
+        let mut all_sell_orders = self.get_all_sell_orders();
+        all_sell_orders.sort_by(|a, b| a.timestamp.cmp(&b.timestamp));
+
+        // Храним оставшиеся объемы ордеров продажи
+        let mut sell_order_remaining_amounts: DashMap<String, u128> = DashMap::new();
+        for sell_order in &all_sell_orders {
+            sell_order_remaining_amounts.insert(sell_order.id.clone(), sell_order.amount);
         }
 
-        
-        all_buy_orders.sort_by(|a, b| b.price.cmp(&a.price));
-        all_sell_orders.sort_by(|a, b| a.price.cmp(&b.price));
+        // Итерируемся по ордерам покупки
+        for buy_order in &all_buy_orders {
+            let mut remaining_buy_amount = buy_order.amount;
 
-        let mut buy_index = 0;
-        let mut sell_index = 0;
+            // Хеш-таблицы для агрегации ордеров в батче
+            let mut batch_buy_orders_map: HashMap<String, u128> = HashMap::new();
+            let mut batch_sell_orders_map: HashMap<String, u128> = HashMap::new();
 
-        while buy_index < all_buy_orders.len() && sell_index < all_sell_orders.len() {
-            let mut current_buy_batch = Vec::new();
-            let mut current_sell_batch = Vec::new();
+            // Итерируемся по ордерам продажи
+            for sell_order in &all_sell_orders {
+                // Проверяем, был ли ордер продажи полностью использован ранее
+                if let Some(sell_remaining_amount) = sell_order_remaining_amounts.get_mut(&sell_order.id) {
+                    if *sell_remaining_amount == 0 {
+                        continue;
+                    }
 
-            
-            while current_buy_batch.len() < batch_size && buy_index < all_buy_orders.len() {
-                let buy_order = &all_buy_orders[buy_index];
+                    // Проверяем временную метку
+                    if sell_order.timestamp > buy_order.timestamp {
+                        continue;
+                    }
 
-                
-                let mut temp_sell_index = sell_index;
+                    // Проверяем цены
+                    if sell_order.price > buy_order.price {
+                        continue;
+                    }
 
-                while current_sell_batch.len() < batch_size && temp_sell_index < all_sell_orders.len() {
-                    let sell_order = &all_sell_orders[temp_sell_index];
+                    // Определяем объем для сопоставления
+                    let match_amount = remaining_buy_amount.min(*sell_remaining_amount);
 
-                    if buy_order.price >= sell_order.price {
-                        current_sell_batch.push(sell_order.clone());
-                        temp_sell_index += 1;
-                    } else {
+                    // Агрегируем объем для ордера покупки
+                    *batch_buy_orders_map.entry(buy_order.id.clone()).or_insert(0) += match_amount;
+
+                    // Агрегируем объем для ордера продажи
+                    *batch_sell_orders_map.entry(sell_order.id.clone()).or_insert(0) += match_amount;
+
+                    // Обновляем оставшиеся объемы
+                    remaining_buy_amount -= match_amount;
+                    *sell_remaining_amount -= match_amount;
+
+                    // Если ордер покупки полностью сопоставлен, выходим из цикла
+                    if remaining_buy_amount == 0 {
                         break;
                     }
-                }
-
-                if !current_sell_batch.is_empty() {
-                    current_buy_batch.push(buy_order.clone());
-                    buy_index += 1;
-                    sell_index = temp_sell_index; 
-
-                    if current_buy_batch.len() >= batch_size && current_sell_batch.len() >= batch_size {
-                        break;
-                    }
-                } else {
-                    
-                    buy_index += 1;
                 }
             }
 
-            if !current_buy_batch.is_empty() && !current_sell_batch.is_empty() {
-                let batch = Batch::new(current_buy_batch.clone(), current_sell_batch.clone());
+            // Формируем батч, если удалось сопоставить хотя бы часть ордера
+            if !batch_buy_orders_map.is_empty() && !batch_sell_orders_map.is_empty() {
+                // Преобразуем хеш-таблицы в вектора ордеров с накопленными объемами
+                let batch_buy_orders: Vec<SpotOrder> = batch_buy_orders_map
+                    .iter()
+                    .map(|(id, &amount)| {
+                        let original_order = all_buy_orders.iter().find(|o| &o.id == id).unwrap();
+                        SpotOrder {
+                            amount,
+                            ..original_order.clone()
+                        }
+                    })
+                    .collect();
+
+                let batch_sell_orders: Vec<SpotOrder> = batch_sell_orders_map
+                    .iter()
+                    .map(|(id, &amount)| {
+                        let original_order = all_sell_orders.iter().find(|o| &o.id == id).unwrap();
+                        SpotOrder {
+                            amount,
+                            ..original_order.clone()
+                        }
+                    })
+                    .collect();
+
+                let batch = Batch::new(batch_buy_orders, batch_sell_orders);
                 selected_batches.push(batch);
-            } else {
-                
-                break;
+
+                // Проверяем размер батча
+                if selected_batches.len() >= batch_size {
+                    break;
+                }
+            }
+        }
+
+        selected_batches
+    }
+
+    //BRUTE`
+    pub async fn select_batches_brute(&self, batch_size: usize) -> Vec<Batch> {
+        let mut selected_batches = Vec::new();
+
+        // Шаг 1: Собираем все ордера
+        let mut all_buy_orders = self.get_all_buy_orders();
+        let mut all_sell_orders = self.get_all_sell_orders();
+
+        // Шаг 2: Сортируем ордера по времени (от старых к новым)
+        all_buy_orders.sort_by(|a, b| a.timestamp.cmp(&b.timestamp));
+        all_sell_orders.sort_by(|a, b| a.timestamp.cmp(&b.timestamp));
+
+        // Храним оставшиеся объемы ордеров продажи
+        let mut sell_order_remaining_amounts: Vec<(usize, u128)> = all_sell_orders
+            .iter()
+            .enumerate()
+            .map(|(i, order)| (i, order.amount))
+            .collect();
+
+        // Итерируемся по ордерам покупки
+        let all_buy_len = all_buy_orders.len();
+        let mut buy_i = 0;
+        for buy_order in &all_buy_orders {
+            info!("batching... buy {:?} from {:?}", &buy_i, &all_buy_len);
+            buy_i +=1;
+            let mut remaining_buy_amount = buy_order.amount;
+
+            let mut batch_buy_orders = Vec::new();
+            let mut batch_sell_orders = Vec::new();
+
+            // Шаг 3: Перебираем ордера продажи
+            let all_sell_len = all_sell_orders.len();
+            for (sell_index, sell_order) in all_sell_orders.iter().enumerate() {
+                //info!("batching... sell {:?} from {:?}", &sell_index, &all_sell_len);
+                // Получаем оставшийся объем ордера продажи
+                let (_, sell_remaining_amount) = &mut sell_order_remaining_amounts[sell_index];
+
+                // Проверяем, не использован ли ордер полностью
+                if *sell_remaining_amount == 0 {
+                    continue;
+                }
+
+                // Проверяем временную метку (ордер продажи должен быть не новее ордера покупки)
+                if sell_order.timestamp > buy_order.timestamp {
+                    continue;
+                }
+
+                // Проверяем цены
+                if sell_order.price > buy_order.price {
+                    continue;
+                }
+
+                // Шаг 4: Определяем объем для сопоставления
+                let match_amount = remaining_buy_amount.min(*sell_remaining_amount);
+
+                // Создаем частичные ордера при необходимости
+                let matched_buy_order = SpotOrder {
+                    amount: match_amount,
+                    ..buy_order.clone()
+                };
+
+                let matched_sell_order = SpotOrder {
+                    amount: match_amount,
+                    ..sell_order.clone()
+                };
+
+                batch_buy_orders.push(matched_buy_order);
+                batch_sell_orders.push(matched_sell_order);
+
+                // Обновляем оставшиеся объемы
+                remaining_buy_amount -= match_amount;
+                *sell_remaining_amount -= match_amount;
+
+                // Если ордер покупки полностью сопоставлен, выходим из цикла
+                if remaining_buy_amount == 0 {
+                    break;
+                }
+            }
+
+            // Шаг 5: Формируем батч, если удалось сопоставить хотя бы часть ордера
+            if !batch_buy_orders.is_empty() && !batch_sell_orders.is_empty() {
+                let batch = Batch::new(batch_buy_orders.clone(), batch_sell_orders.clone());
+                selected_batches.push(batch);
+
+                // Проверяем размер батча
+                if selected_batches.len() >= batch_size {
+                    break;
+                }
             }
         }
 
@@ -294,6 +423,23 @@ impl ShardedOrderPool {
         } else {
             Vec::new()
         }
+    }
+
+
+    pub fn get_all_buy_orders(&self) -> Vec<SpotOrder> {
+        let mut all_orders = Vec::new();
+        for shard in &self.shards {
+            all_orders.extend(shard.get_all_buy_orders());
+        }
+        all_orders
+    }
+
+    pub fn get_all_sell_orders(&self) -> Vec<SpotOrder> {
+        let mut all_orders = Vec::new();
+        for shard in &self.shards {
+            all_orders.extend(shard.get_all_sell_orders());
+        }
+        all_orders
     }
 
 }
