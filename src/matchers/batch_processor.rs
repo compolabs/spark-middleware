@@ -89,13 +89,16 @@ impl BatchProcessor {
         ws_stream: Arc<Mutex<WebSocketStream<TcpStream>>>,
     ) -> Option<MatcherResponse> {
         let mut ws_stream_lock = ws_stream.lock().await;
+        let mut ws_stream_next = ws_stream_lock.next();
 
-        while let Some(message) = ws_stream_lock.next().await {
+        // Set a timeout duration (e.g., 5 seconds)
+        let duration = Duration::from_secs(5);
+
+        while let Ok(Some(message)) = tokio::time::timeout(duration, ws_stream_next).await {
             match message {
                 Ok(Message::Text(text)) => {
-                    
                     if let Ok(response) = serde_json::from_str::<MatcherResponse>(&text) {
-                        return Some(response); 
+                        return Some(response);
                     } else {
                         error!("Failed to parse message into MatcherResponse");
                     }
@@ -104,8 +107,10 @@ impl BatchProcessor {
                     error!("Received unexpected message from matcher.");
                 }
             }
+            ws_stream_next = ws_stream_lock.next();
         }
 
+        error!("Timeout while waiting for matcher response");
         None
     }
 
@@ -181,10 +186,10 @@ impl BatchProcessor {
         &self,
         ws_stream: Arc<Mutex<WebSocketStream<TcpStream>>>,
         sender: mpsc::Sender<String>,
-        order_pool: Arc<ShardedOrderPool>, 
+        order_pool: Arc<ShardedOrderPool>,
         matcher_manager: Arc<Mutex<MatcherManager>>,
         uuid: String,
-        batch: Batch, 
+        batch: Batch,
     ) -> Result<(), Error> {
         let flat_batch: Vec<SpotOrder> = batch
             .buy_orders
@@ -192,28 +197,24 @@ impl BatchProcessor {
             .chain(batch.sell_orders.into_iter())
             .collect();
 
-        info!("Sending batch of {} orders to matcher {}", flat_batch.len(), uuid);
+        info!(
+            "Sending batch of {} orders to matcher {}",
+            flat_batch.len(),
+            uuid
+        );
 
-        
         if let Err(e) = self.send_batch_to_matcher(ws_stream.clone(), flat_batch).await {
             error!("Failed to send batch to matcher {}: {}", uuid, e);
             return Err(Error::SendingToMatcherError);
         }
 
-        
         if let Some(response) = self.receive_matcher_response(ws_stream.clone()).await {
-            
             order_pool.update_order_status(response.orders).await;
-
-            /*
-            self.metrics_handler
-                .process_matcher_response(response, &order_pool, sender.clone(), &uuid)
-                .await;
-            */
-
             matcher_manager.lock().await.increase_load(&uuid, 1);
         } else {
-            error!("No response from matcher {}", uuid);
+            error!("No response from matcher {} within timeout", uuid);
+            // Handle the timeout case, e.g., retry or mark orders as failed
+            // You can implement retry logic here if needed
         }
 
         Ok(())

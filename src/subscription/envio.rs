@@ -5,6 +5,7 @@ pub fn format_graphql_pagination_subscription(
     order_type: OrderType,
     offset: u64,
     limit: u64,
+    market: &str,
 ) -> String {
     let order_type_str = match order_type {
         OrderType::Sell => "ActiveSellOrder",
@@ -16,6 +17,7 @@ pub fn format_graphql_pagination_subscription(
             {}(
                 limit: {},
                 offset: {},
+                where: {{ market: {{_eq: "{}"}}}}, 
                 order_by: {{ timestamp: asc }} 
             ) {{
                 id
@@ -27,12 +29,12 @@ pub fn format_graphql_pagination_subscription(
                 price
             }}
         }}"#,
-        order_type_str, limit, offset
+        order_type_str, limit, offset, market
     );
     a
 }
 
-pub fn format_graphql_subscription(order_type: OrderType) -> String {
+pub fn format_graphql_subscription(order_type: OrderType, market: &str) -> String {
     let limit = ev("FETCH_ORDER_LIMIT").unwrap_or_default();
     let order_type_str = match order_type {
         OrderType::Sell => "ActiveSellOrder",

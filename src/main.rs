@@ -114,7 +114,8 @@ async fn initialize_envio_indexer(
     order_managers: &mut HashMap<String, Arc<OrderManager>>,
 ) -> Result<(), Error> {
     let ws_url_envio = Url::parse(&settings.websockets.envio_url)?;
-    let websocket_client_envio = Arc::new(WebSocketClientEnvio::new(ws_url_envio));
+    let contract_envio = &settings.contract.contract_id;
+    let websocket_client_envio = Arc::new(WebSocketClientEnvio::new(ws_url_envio, contract_envio.clone()));
 
     let (tx, mut rx) = mpsc::channel(100);
 

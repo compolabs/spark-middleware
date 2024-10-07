@@ -22,11 +22,12 @@ use crate::{
 
 pub struct WebSocketClientEnvio {
     pub url: Url,
+    pub contract: String
 }
 
 impl WebSocketClientEnvio {
-    pub fn new(url: Url) -> Self {
-        WebSocketClientEnvio { url }
+    pub fn new(url: Url, contract: String) -> Self {
+        WebSocketClientEnvio { url , contract}
     }
 
     pub async fn synchronize(
@@ -157,7 +158,7 @@ impl WebSocketClientEnvio {
 
         loop {
             let subscription_query =
-                format_graphql_pagination_subscription(order_type, offset, limit);
+                format_graphql_pagination_subscription(order_type, offset, limit, &self.contract);
             info!(
                 "Fetching historical {:?} orders with offset: {}",
                 order_type, offset
@@ -186,91 +187,85 @@ impl WebSocketClientEnvio {
                     })?;
             }
 
-            let response = {
-                let mut client_lock = client.lock().await;
-                client_lock.next().await
-            };
+            // Read messages until we get the data or an error
+            let orders_to_process = loop {
+                let response = {
+                    let mut client_lock = client.lock().await;
+                    client_lock.next().await
+                };
 
-            if let Some(response) = response {
-                match response {
-                    Ok(Message::Text(text)) => {
-                        if let Ok(parsed_response) =
-                            serde_json::from_str::<WebSocketResponseEnvio>(&text)
-                        {
-                            if let Some(payload) = parsed_response.payload {
-                                let orders_to_process = match order_type {
-                                    OrderType::Buy => {
-                                        payload.data.active_buy_order.unwrap_or_default()
-                                    }
-                                    OrderType::Sell => {
-                                        payload.data.active_sell_order.unwrap_or_default()
-                                    }
-                                };
+                if let Some(response) = response {
+                    match response {
+                        Ok(Message::Text(text)) => {
+                            if let Ok(parsed_response) =
+                                serde_json::from_str::<WebSocketResponseEnvio>(&text)
+                            {
+                                if let Some(payload) = parsed_response.payload {
+                                    let orders = match order_type {
+                                        OrderType::Buy => payload.data.active_buy_order.unwrap_or_default(),
+                                        OrderType::Sell => payload.data.active_sell_order.unwrap_or_default(),
+                                    };
 
-                                if orders_to_process.is_empty() {
-                                    info!("No more historical orders found for {:?}", order_type);
-                                    break;
-                                } else {
-                                    info!(
-                                        "Received response for historical {:?} orders with offset {}: {}",
-                                        order_type, offset, orders_to_process.len());
+                                    break orders;
                                 }
-                                total_orders_received += orders_to_process.len();
-
-                                for order in orders_to_process {
-                                    let order_status = order.status.clone();
-                                    match SpotOrder::from_indexer_envio(order) {
-                                        Ok(spot_order) => {
-                                            if let Some(status) = order_status {
-                                                if status == "Active" {
-                                                    info!("!!!!Sending sport order {:?}", &spot_order);
-                                                    sender
-                                                        .send(OrderManagerMessage::AddOrder(
-                                                            spot_order,
-                                                        ))
-                                                        .await
-                                                        .map_err(|_| {
-                                                            Error::OrderManagerSendError
-                                                        })?;
-                                                } else {
-                                                    info!(
-                                                        "Skipping non-active order with ID: {}",
-                                                        spot_order.id
-                                                    );
-                                                }
-                                            } else {
-                                                sender
-                                                    .send(OrderManagerMessage::AddOrder(spot_order))
-                                                    .await
-                                                    .map_err(|_| Error::OrderManagerSendError)?;
-                                            }
-                                        }
-                                        Err(e) => error!("Failed to convert order: {:?}", e),
-                                    }
-                                }
-                                offset += limit;
+                            } else {
+                                // Handle non-data messages like "connection_ack" or "ka"
+                                continue;
                             }
-                        } else {
-                            error!("Failed to parse WebSocket response: {:?}", text);
+                        }
+                        Ok(_) => continue, // Ignore non-text messages
+                        Err(e) => {
+                            error!("Error during synchronization for {:?}: {:?}", order_type, e);
+                            return Err(Error::EnvioWebsocketConnectionError);
                         }
                     }
-                    Ok(_) => warn!(
-                        "Received non-text message during synchronization for {:?}",
-                        order_type
-                    ),
-                    Err(e) => {
-                        error!("Error during synchronization for {:?}: {:?}", order_type, e);
-                        break;
+                } else {
+                    error!("WebSocket stream ended unexpectedly");
+                    return Err(Error::EnvioWebsocketConnectionError);
+                }
+            };
+
+            if orders_to_process.is_empty() {
+                info!("No more historical orders found for {:?}", order_type);
+                break;
+            } else {
+                info!(
+                    "Received response for historical {:?} orders with offset {}: {}",
+                    order_type, offset, orders_to_process.len()
+                );
+            }
+            total_orders_received += orders_to_process.len();
+
+            for order in orders_to_process {
+                let order_status = order.status.clone();
+                match SpotOrder::from_indexer_envio(order) {
+                    Ok(spot_order) => {
+                        if let Some(status) = order_status {
+                            if status == "Active" {
+                                sender
+                                    .send(OrderManagerMessage::AddOrder(spot_order))
+                                    .await
+                                    .map_err(|_| Error::OrderManagerSendError)?;
+                            } else {
+                                info!(
+                                    "Skipping non-active order with ID: {}",
+                                    spot_order.id
+                                );
+                            }
+                        } else {
+                            sender
+                                .send(OrderManagerMessage::AddOrder(spot_order))
+                                .await
+                                .map_err(|_| Error::OrderManagerSendError)?;
+                        }
                     }
+                    Err(e) => error!("Failed to convert order: {:?}", e),
                 }
             }
+            offset += limit;
         }
 
-        info!("==================================================================");
-        info!("==================================================================");
-        info!("orders {:?}", total_orders_received);
-        info!("==================================================================");
-        info!("==================================================================");
+        info!("Total orders received: {}", total_orders_received);
 
         Ok(())
     }
@@ -281,7 +276,7 @@ impl WebSocketClientEnvio {
         client: Arc<Mutex<WebSocketStream<MaybeTlsStream<TcpStream>>>>,
         sender: mpsc::Sender<OrderManagerMessage>,
     ) -> Result<(), Error> {
-        let subscription_query = format_graphql_pagination_subscription(order_type, 0, 0);
+        let subscription_query = format_graphql_pagination_subscription(order_type, 0, 0, &self.contract);
 
         let start_msg = serde_json::json!({
                 "id": format!("{}", order_type as u8),
