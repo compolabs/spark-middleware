@@ -114,6 +114,24 @@ impl OrderShard {
         }
     }
 
+    pub async fn update_order_status(
+        &self,
+        order_id: &str,
+        price: u128,
+        new_status: OrderStatus,
+    ) {
+        if let Some(price_level) = self.buy_orders_by_price.get_mut(&price) {
+            if let Some(mut order) = price_level.get_mut(order_id) {
+                order.status = Some(new_status);
+            }
+        }
+        if let Some(price_level) = self.sell_orders_by_price.get_mut(&price) {
+            if let Some(mut order) = price_level.get_mut(order_id) {
+                order.status = Some(new_status);
+            }
+        }
+    }
+
     pub fn get_best_buy_orders(&self) -> Vec<SpotOrder> {
         let buy_price_levels = self.buy_price_levels.lock().unwrap();
         let mut orders = Vec::new();

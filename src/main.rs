@@ -7,7 +7,7 @@ use indexer::{
     superchain::start_superchain_indexer,
 };
 use log::info;
-use matchers::manager::MatcherManager;
+use matchers::batch_processor::BatchProcessor;
 use matchers::websocket::MatcherWebSocket;
 use metrics::types::OrderMetrics;
 use middleware::aggregator::Aggregator;
@@ -36,8 +36,6 @@ async fn main() -> Result<(), Error> {
 
     let settings = Arc::new(Settings::new());
     let mut tasks = vec![];
-
-    let matcher_manager = Arc::new(Mutex::new(MatcherManager::new()));
 
     let mut order_managers: HashMap<String, Arc<OrderManager>> = HashMap::new();
 
@@ -87,7 +85,6 @@ async fn main() -> Result<(), Error> {
     let matcher_task = tokio::spawn(run_matcher_server(
         settings.clone(),
         Arc::clone(&envio_manager.order_pool),
-        matcher_manager.clone(),
         order_metrics,
     ));
     tasks.push(matcher_task);
@@ -217,13 +214,12 @@ async fn run_rocket_server(
 async fn run_matcher_server(
     settings: Arc<Settings>,
     order_pool: Arc<ShardedOrderPool>, 
-    matcher_manager: Arc<Mutex<MatcherManager>>,
-    metrics: Arc<Mutex<OrderMetrics>>,
+    _metrics: Arc<Mutex<OrderMetrics>>,
 ) {
     let listener = TcpListener::bind(&settings.matchers.matcher_ws_url)
         .await
         .unwrap(); 
-    let matcher_websocket = Arc::new(MatcherWebSocket::new(settings.clone(), metrics.clone()));
+    let matcher_websocket = Arc::new(MatcherWebSocket::new(settings.clone(), BatchProcessor::new(settings.clone())));
 
     info!(
         "Matcher WebSocket server started at {}",
@@ -237,12 +233,10 @@ async fn run_matcher_server(
 
         let matcher_websocket = Arc::clone(&matcher_websocket);
         let order_pool_clone = Arc::clone(&order_pool); 
-        let matcher_manager_clone = Arc::clone(&matcher_manager);
 
-        let (tx, _) = mpsc::channel(100);
         tokio::spawn(async move {
             matcher_websocket
-                .handle_connection(ws_stream, tx, order_pool_clone, matcher_manager_clone)
+                .handle_connection(ws_stream, order_pool_clone)
                 .await;
         });
     }

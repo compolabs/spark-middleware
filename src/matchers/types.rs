@@ -1,27 +1,27 @@
 use crate::indexer::spot_order::{OrderStatus, OrderType, SpotOrder};
 use serde::{Deserialize, Serialize};
 
-#[derive(Serialize, Deserialize)]
-pub enum MatcherRequest {
-    Orders(Vec<SpotOrder>),
-}
-
 #[derive(Debug, Serialize, Deserialize)]
-pub struct MatcherResponseWrapper {
-    pub MatchResult: MatcherResponse,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct MatcherResponse {
-    pub success: bool,
-    pub orders: Vec<MatcherOrderUpdate>, 
-}
-
-#[derive(Deserialize)]
 pub struct MatcherConnectRequest {
     pub uuid: String,
 }
 
+#[derive(Debug, Serialize, Deserialize)]
+pub struct MatcherBatchRequest {
+    pub uuid: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub enum MatcherRequest {
+    BatchRequest(MatcherBatchRequest),
+    OrderUpdates(Vec<MatcherOrderUpdate>),
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub enum MatcherResponse {
+    Batch(Vec<SpotOrder>),
+    Ack, // Подтверждение получения обновлений
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MatcherOrderUpdate {

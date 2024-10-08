@@ -1,5 +1,4 @@
 use crate::indexer::spot_order::{OrderStatus, OrderType, SpotOrder};
-use crate::matchers::batch_processor::Batch;
 use crate::matchers::types::MatcherOrderUpdate;
 use crate::middleware::order_shard::OrderShard;
 use log::info;
@@ -167,6 +166,13 @@ impl ShardedOrderPool {
     ) {
         if let Some(shard) = self.get_shard_by_price_and_time(price, timestamp) {
             shard.update_order(order_id, price, new_amount, status, order_type).await;
+
+            // Если ордер полностью исполнен или отменен, удаляем его из пула
+            if let Some(new_status) = status {
+                if new_status == OrderStatus::Filled || new_status == OrderStatus::Failed {
+                    shard.remove_order(order_id, price, order_type).await;
+                }
+            }
         } else {
             log::warn!(
                 "Shard not found for order_id {}, price {}, timestamp {}",
@@ -194,7 +200,7 @@ impl ShardedOrderPool {
         all_orders.sort_by(|a, b| a.price.cmp(&b.price));
         all_orders
     }
-
+/*
     pub async fn select_batches(&self, batch_size: usize) -> Vec<Batch> {
         let mut selected_batches = Vec::new();
 
@@ -261,7 +267,7 @@ impl ShardedOrderPool {
 
         selected_batches
     }
-
+*/
     pub fn clear_orders(&self) {
         for shard in &self.shards {
             shard.clear_orders();
@@ -296,4 +302,64 @@ impl ShardedOrderPool {
         }
     }
 
+
+    pub async fn select_batch(&self, batch_size: usize) -> Vec<SpotOrder> {
+        let mut selected_orders = Vec::new();
+
+        // Проходим по всем шардам
+        for shard in &self.shards {
+            // Получаем лучшие ордера покупки и продажи
+            let buy_orders = shard.get_best_buy_orders();
+            let sell_orders = shard.get_best_sell_orders();
+
+            // Фильтруем ордера, которые не в обработке
+            let available_buy_orders: Vec<_> = buy_orders
+                .into_iter()
+                .filter(|order| order.status.unwrap_or(OrderStatus::New) == OrderStatus::New)
+                .collect();
+
+            let available_sell_orders: Vec<_> = sell_orders
+                .into_iter()
+                .filter(|order| order.status.unwrap_or(OrderStatus::New) == OrderStatus::New)
+                .collect();
+
+            // Здесь можно реализовать вашу логику по сопоставлению ордеров
+            // Например, добавить их в selected_orders, если цены подходят
+
+            // Для простоты добавим первые доступные ордера
+            for buy_order in available_buy_orders {
+                if selected_orders.len() >= batch_size {
+                    break;
+                }
+
+                // Проверяем, есть ли подходящий ордер продажи
+                if let Some(sell_order) = available_sell_orders.iter().find(|sell_order| buy_order.price >= sell_order.price) {
+                    selected_orders.push(buy_order.clone());
+                    selected_orders.push(sell_order.clone());
+
+                    // Устанавливаем статус ордеров на InProgress
+                    self.update_order_status_internal(&buy_order.id, buy_order.price, buy_order.timestamp, OrderStatus::InProgress).await;
+                    self.update_order_status_internal(&sell_order.id, sell_order.price, sell_order.timestamp, OrderStatus::InProgress).await;
+                }
+            }
+
+            if selected_orders.len() >= batch_size {
+                break;
+            }
+        }
+
+        selected_orders
+    }
+
+    async fn update_order_status_internal(
+        &self,
+        order_id: &str,
+        price: u128,
+        timestamp: u64,
+        new_status: OrderStatus,
+    ) {
+        if let Some(shard) = self.get_shard_by_price_and_time(price, timestamp) {
+            shard.update_order_status(order_id, price, new_status).await;
+        }
+    }
 }
