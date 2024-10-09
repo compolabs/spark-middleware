@@ -1,5 +1,4 @@
 use crate::{config::env::ev, indexer::spot_order::OrderType};
-use log::info;
 
 pub fn format_graphql_pagination_subscription(
     order_type: OrderType,
@@ -34,7 +33,7 @@ pub fn format_graphql_pagination_subscription(
     a
 }
 
-pub fn format_graphql_subscription(order_type: OrderType, market: &str) -> String {
+pub fn format_graphql_subscription(order_type: OrderType, _market: &str) -> String {
     let limit = ev("FETCH_ORDER_LIMIT").unwrap_or_default();
     let order_type_str = match order_type {
         OrderType::Sell => "ActiveSellOrder",

@@ -20,7 +20,6 @@ impl OrderShard {
         }
     }
 
-    
     pub async fn add_order(&self, order: SpotOrder) {
         let price = order.price;
         let order_id = order.id.clone();
@@ -47,7 +46,6 @@ impl OrderShard {
         }
     }
 
-    
     pub async fn remove_order(&self, order_id: &str, price: u128, order_type: OrderType) {
         match order_type {
             OrderType::Buy => {
@@ -73,7 +71,6 @@ impl OrderShard {
         }
     }
 
-    
     pub async fn update_order(
         &self,
         order_id: &str,
@@ -114,12 +111,7 @@ impl OrderShard {
         }
     }
 
-    pub async fn update_order_status(
-        &self,
-        order_id: &str,
-        price: u128,
-        new_status: OrderStatus,
-    ) {
+    pub async fn update_order_status(&self, order_id: &str, price: u128, new_status: OrderStatus) {
         if let Some(price_level) = self.buy_orders_by_price.get_mut(&price) {
             if let Some(mut order) = price_level.get_mut(order_id) {
                 order.status = Some(new_status);
@@ -238,5 +230,4 @@ impl OrderShard {
             .map(|entry| entry.value().len())
             .sum()
     }
-
 }

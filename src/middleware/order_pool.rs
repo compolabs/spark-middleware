@@ -1,7 +1,6 @@
 use crate::indexer::spot_order::{OrderStatus, OrderType, SpotOrder};
 use crate::matchers::types::MatcherOrderUpdate;
 use crate::middleware::order_shard::OrderShard;
-use log::info;
 use schemars::JsonSchema;
 use serde::Serialize;
 use std::sync::Arc;
@@ -18,7 +17,6 @@ pub struct PriceTimeRange {
 pub fn generate_price_time_ranges() -> Vec<PriceTimeRange> {
     let mut ranges = Vec::new();
 
-    
     let price_ranges = vec![
         (0, 40_000 * 1_000_000),
         (40_000 * 1_000_000, 45_000 * 1_000_000),
@@ -30,16 +28,13 @@ pub fn generate_price_time_ranges() -> Vec<PriceTimeRange> {
         (70_000 * 1_000_000, u128::MAX),
     ];
 
-    
     let current_time = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap()
         .as_secs();
 
-    
     let time_interval = 4 * 60 * 60;
 
-    
     for (min_price, max_price) in price_ranges {
         for i in 0..100 {
             let max_time = current_time.saturating_sub(i * time_interval);
@@ -142,16 +137,8 @@ impl ShardedOrderPool {
                 order_type,
             } = order_update;
 
-            
-            self.update_order_in_shard(
-                &order_id,
-                price,
-                timestamp,
-                new_amount,
-                status,
-                order_type,
-            )
-            .await;
+            self.update_order_in_shard(&order_id, price, timestamp, new_amount, status, order_type)
+                .await;
         }
     }
 
@@ -165,7 +152,9 @@ impl ShardedOrderPool {
         order_type: OrderType,
     ) {
         if let Some(shard) = self.get_shard_by_price_and_time(price, timestamp) {
-            shard.update_order(order_id, price, new_amount, status, order_type).await;
+            shard
+                .update_order(order_id, price, new_amount, status, order_type)
+                .await;
 
             // Если ордер полностью исполнен или отменен, удаляем его из пула
             if let Some(new_status) = status {
@@ -200,74 +189,74 @@ impl ShardedOrderPool {
         all_orders.sort_by(|a, b| a.price.cmp(&b.price));
         all_orders
     }
-/*
-    pub async fn select_batches(&self, batch_size: usize) -> Vec<Batch> {
-        let mut selected_batches = Vec::new();
+    /*
+        pub async fn select_batches(&self, batch_size: usize) -> Vec<Batch> {
+            let mut selected_batches = Vec::new();
 
-        
-        let mut all_buy_orders = Vec::new();
-        let mut all_sell_orders = Vec::new();
 
-        for shard in &self.shards {
-            all_buy_orders.extend(shard.get_best_buy_orders());
-            all_sell_orders.extend(shard.get_best_sell_orders());
-        }
+            let mut all_buy_orders = Vec::new();
+            let mut all_sell_orders = Vec::new();
 
-        
-        all_buy_orders.sort_by(|a, b| b.price.cmp(&a.price));
-        all_sell_orders.sort_by(|a, b| a.price.cmp(&b.price));
+            for shard in &self.shards {
+                all_buy_orders.extend(shard.get_best_buy_orders());
+                all_sell_orders.extend(shard.get_best_sell_orders());
+            }
 
-        let mut buy_index = 0;
-        let mut sell_index = 0;
 
-        while buy_index < all_buy_orders.len() && sell_index < all_sell_orders.len() {
-            let mut current_buy_batch = Vec::new();
-            let mut current_sell_batch = Vec::new();
+            all_buy_orders.sort_by(|a, b| b.price.cmp(&a.price));
+            all_sell_orders.sort_by(|a, b| a.price.cmp(&b.price));
 
-            
-            while current_buy_batch.len() < batch_size && buy_index < all_buy_orders.len() {
-                let buy_order = &all_buy_orders[buy_index];
+            let mut buy_index = 0;
+            let mut sell_index = 0;
 
-                
-                let mut temp_sell_index = sell_index;
+            while buy_index < all_buy_orders.len() && sell_index < all_sell_orders.len() {
+                let mut current_buy_batch = Vec::new();
+                let mut current_sell_batch = Vec::new();
 
-                while current_sell_batch.len() < batch_size && temp_sell_index < all_sell_orders.len() {
-                    let sell_order = &all_sell_orders[temp_sell_index];
 
-                    if buy_order.price >= sell_order.price {
-                        current_sell_batch.push(sell_order.clone());
-                        temp_sell_index += 1;
+                while current_buy_batch.len() < batch_size && buy_index < all_buy_orders.len() {
+                    let buy_order = &all_buy_orders[buy_index];
+
+
+                    let mut temp_sell_index = sell_index;
+
+                    while current_sell_batch.len() < batch_size && temp_sell_index < all_sell_orders.len() {
+                        let sell_order = &all_sell_orders[temp_sell_index];
+
+                        if buy_order.price >= sell_order.price {
+                            current_sell_batch.push(sell_order.clone());
+                            temp_sell_index += 1;
+                        } else {
+                            break;
+                        }
+                    }
+
+                    if !current_sell_batch.is_empty() {
+                        current_buy_batch.push(buy_order.clone());
+                        buy_index += 1;
+                        sell_index = temp_sell_index;
+
+                        if current_buy_batch.len() >= batch_size && current_sell_batch.len() >= batch_size {
+                            break;
+                        }
                     } else {
-                        break;
+
+                        buy_index += 1;
                     }
                 }
 
-                if !current_sell_batch.is_empty() {
-                    current_buy_batch.push(buy_order.clone());
-                    buy_index += 1;
-                    sell_index = temp_sell_index; 
-
-                    if current_buy_batch.len() >= batch_size && current_sell_batch.len() >= batch_size {
-                        break;
-                    }
+                if !current_buy_batch.is_empty() && !current_sell_batch.is_empty() {
+                    let batch = Batch::new(current_buy_batch.clone(), current_sell_batch.clone());
+                    selected_batches.push(batch);
                 } else {
-                    
-                    buy_index += 1;
+
+                    break;
                 }
             }
 
-            if !current_buy_batch.is_empty() && !current_sell_batch.is_empty() {
-                let batch = Batch::new(current_buy_batch.clone(), current_sell_batch.clone());
-                selected_batches.push(batch);
-            } else {
-                
-                break;
-            }
+            selected_batches
         }
-
-        selected_batches
-    }
-*/
+    */
     pub fn clear_orders(&self) {
         for shard in &self.shards {
             shard.clear_orders();
@@ -302,7 +291,6 @@ impl ShardedOrderPool {
         }
     }
 
-
     pub async fn select_batch(&self, batch_size: usize) -> Vec<SpotOrder> {
         let mut selected_orders = Vec::new();
 
@@ -333,13 +321,28 @@ impl ShardedOrderPool {
                 }
 
                 // Проверяем, есть ли подходящий ордер продажи
-                if let Some(sell_order) = available_sell_orders.iter().find(|sell_order| buy_order.price >= sell_order.price) {
+                if let Some(sell_order) = available_sell_orders
+                    .iter()
+                    .find(|sell_order| buy_order.price >= sell_order.price)
+                {
                     selected_orders.push(buy_order.clone());
                     selected_orders.push(sell_order.clone());
 
                     // Устанавливаем статус ордеров на InProgress
-                    self.update_order_status_internal(&buy_order.id, buy_order.price, buy_order.timestamp, OrderStatus::InProgress).await;
-                    self.update_order_status_internal(&sell_order.id, sell_order.price, sell_order.timestamp, OrderStatus::InProgress).await;
+                    self.update_order_status_internal(
+                        &buy_order.id,
+                        buy_order.price,
+                        buy_order.timestamp,
+                        OrderStatus::InProgress,
+                    )
+                    .await;
+                    self.update_order_status_internal(
+                        &sell_order.id,
+                        sell_order.price,
+                        sell_order.timestamp,
+                        OrderStatus::InProgress,
+                    )
+                    .await;
                 }
             }
 

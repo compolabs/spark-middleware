@@ -40,7 +40,9 @@ impl PartialEq for SpotOrder {
 
 impl Ord for SpotOrder {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        self.price.cmp(&other.price)
+        self.price
+            .cmp(&other.price)
+            .then_with(|| self.timestamp.cmp(&other.timestamp)) // Сравниваем по времени, если цена одинаковая
     }
 }
 
@@ -127,12 +129,6 @@ pub struct OrderPayloadSubsquid {
     pub active_buy_orders: Option<Vec<SubsquidOrder>>,
     pub active_sell_orders: Option<Vec<SubsquidOrder>>,
 }
-/*
-#[derive(Debug, Clone, Deserialize)]
-pub struct OrderPayloadEnvio {
-    pub Order: Option<Vec<SpotOrderEnvio>>,
-}
-*/
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct OrderPayloadEnvio {

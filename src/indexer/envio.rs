@@ -1,4 +1,4 @@
-use std::{sync::Arc, time::Duration};
+use std::sync::Arc;
 
 use futures_util::{SinkExt, StreamExt};
 use log::{error, info, warn};
@@ -17,17 +17,17 @@ use crate::{
     error::Error,
     indexer::spot_order::{OrderType, SpotOrder, WebSocketResponseEnvio},
     middleware::manager::OrderManagerMessage,
-    subscription::envio::{format_graphql_count_query, format_graphql_pagination_subscription},
+    subscription::envio::format_graphql_pagination_subscription,
 };
 
 pub struct WebSocketClientEnvio {
     pub url: Url,
-    pub contract: String
+    pub contract: String,
 }
 
 impl WebSocketClientEnvio {
     pub fn new(url: Url, contract: String) -> Self {
-        WebSocketClientEnvio { url , contract}
+        WebSocketClientEnvio { url, contract }
     }
 
     pub async fn synchronize(
@@ -202,8 +202,12 @@ impl WebSocketClientEnvio {
                             {
                                 if let Some(payload) = parsed_response.payload {
                                     let orders = match order_type {
-                                        OrderType::Buy => payload.data.active_buy_order.unwrap_or_default(),
-                                        OrderType::Sell => payload.data.active_sell_order.unwrap_or_default(),
+                                        OrderType::Buy => {
+                                            payload.data.active_buy_order.unwrap_or_default()
+                                        }
+                                        OrderType::Sell => {
+                                            payload.data.active_sell_order.unwrap_or_default()
+                                        }
                                     };
 
                                     break orders;
@@ -231,7 +235,9 @@ impl WebSocketClientEnvio {
             } else {
                 info!(
                     "Received response for historical {:?} orders with offset {}: {}",
-                    order_type, offset, orders_to_process.len()
+                    order_type,
+                    offset,
+                    orders_to_process.len()
                 );
             }
             total_orders_received += orders_to_process.len();
@@ -247,10 +253,7 @@ impl WebSocketClientEnvio {
                                     .await
                                     .map_err(|_| Error::OrderManagerSendError)?;
                             } else {
-                                info!(
-                                    "Skipping non-active order with ID: {}",
-                                    spot_order.id
-                                );
+                                info!("Skipping non-active order with ID: {}", spot_order.id);
                             }
                         } else {
                             sender
@@ -276,7 +279,8 @@ impl WebSocketClientEnvio {
         client: Arc<Mutex<WebSocketStream<MaybeTlsStream<TcpStream>>>>,
         sender: mpsc::Sender<OrderManagerMessage>,
     ) -> Result<(), Error> {
-        let subscription_query = format_graphql_pagination_subscription(order_type, 0, 0, &self.contract);
+        let subscription_query =
+            format_graphql_pagination_subscription(order_type, 0, 0, &self.contract);
 
         let start_msg = serde_json::json!({
                 "id": format!("{}", order_type as u8),

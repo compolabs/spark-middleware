@@ -1,7 +1,6 @@
 use crate::config::settings::Settings;
 use crate::indexer::spot_order::SpotOrder;
 use crate::middleware::order_pool::ShardedOrderPool;
-use log::error;
 use std::sync::Arc;
 
 pub struct BatchProcessor {

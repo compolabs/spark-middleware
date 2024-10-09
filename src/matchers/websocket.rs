@@ -1,7 +1,7 @@
 use crate::config::settings::Settings;
 use crate::matchers::batch_processor::BatchProcessor;
 use crate::matchers::types::{
-    MatcherBatchRequest, MatcherConnectRequest, MatcherRequest, MatcherResponse, MatcherOrderUpdate,
+    MatcherConnectRequest, MatcherRequest, MatcherResponse,
 };
 use crate::middleware::order_pool::ShardedOrderPool;
 use futures_util::{SinkExt, StreamExt};
@@ -30,7 +30,7 @@ impl MatcherWebSocket {
         order_pool: Arc<ShardedOrderPool>,
     ) {
         // Разделяем поток на write и read
-        let (mut write, mut read) = ws_stream.split();
+        let (write, mut read) = ws_stream.split();
 
         // Первое сообщение должно быть идентификацией
         if let Some(Ok(message)) = read.next().await {
@@ -119,4 +119,3 @@ impl MatcherWebSocket {
         }
     }
 }
-

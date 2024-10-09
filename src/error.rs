@@ -62,8 +62,8 @@ pub enum Error {
     #[error("Async tungstenite error {0}")]
     AsyncTungsteniteError(#[from] async_tungstenite::tungstenite::Error),
 
-    #[error("Superchain client error {0}")]
-    SuperchainClientError(#[from] superchain_client::Error),
+    #[error("Pangea client error {0}")]
+    PangeaClientError(#[from] pangea_client::Error),
 }
 
 impl From<&str> for Error {

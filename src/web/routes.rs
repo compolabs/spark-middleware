@@ -8,14 +8,12 @@ use rocket_okapi::swagger_ui::SwaggerUIConfig;
 use rocket_okapi::{openapi, openapi_get_routes, JsonSchema};
 use serde::{Deserialize, Serialize};
 
-use async_graphql_rocket::{GraphQLQuery, GraphQLRequest, GraphQLResponse};
 use tokio::sync::Mutex;
 
 use crate::indexer::spot_order::{OrderType, SpotOrder};
-use crate::metrics::types::OrderMetrics;
 use crate::middleware::aggregator::Aggregator;
 use crate::middleware::manager::OrderManager;
-use crate::middleware::order_pool::{PriceTimeRange, ShardDetails, ShardOrdersDetailedResponse};
+use crate::middleware::order_pool::ShardOrdersDetailedResponse;
 
 #[derive(Serialize, JsonSchema)]
 pub struct ShardOrdersCountResponse {
@@ -45,7 +43,7 @@ pub struct OrdersResponse {
 pub enum Indexer {
     Envio,
     Subsquid,
-    Superchain,
+    Pangea,
 }
 
 impl Indexer {
@@ -53,12 +51,12 @@ impl Indexer {
         match self {
             Indexer::Envio => "envio",
             Indexer::Subsquid => "subsquid",
-            Indexer::Superchain => "superchain",
+            Indexer::Pangea => "superchain",
         }
     }
 
     pub fn all() -> Vec<Indexer> {
-        vec![Indexer::Envio, Indexer::Subsquid, Indexer::Superchain]
+        vec![Indexer::Envio, Indexer::Subsquid, Indexer::Pangea]
     }
 }
 
@@ -69,7 +67,7 @@ impl<'r> FromParam<'r> for Indexer {
         match param {
             "Envio" => Ok(Indexer::Envio),
             "Subsquid" => Ok(Indexer::Subsquid),
-            "Superchain" => Ok(Indexer::Superchain),
+            "Pangea" => Ok(Indexer::Pangea),
             _ => Err(param),
         }
     }
@@ -82,16 +80,6 @@ pub struct SpreadResponse {
     pub spread: Option<i128>,
 }
 
-#[openapi]
-#[get("/metrics")]
-async fn get_metrics(metrics: &State<Arc<Mutex<OrderMetrics>>>) -> Json<MetricsResponse> {
-    let metrics = metrics.lock().await;
-    Json(MetricsResponse {
-        total_matched: metrics.total_matched,
-        total_remaining: metrics.total_remaining,
-        matched_per_second: metrics.matched_per_second,
-    })
-}
 
 #[openapi]
 #[get("/orders/count")]
@@ -282,7 +270,6 @@ pub fn get_routes() -> Vec<Route> {
         get_indexer_spread,
         get_aggregated_spread,
         get_orders_count,
-        get_metrics,
         get_shard_order_details,
         get_aggregated_shard_order_details,
     ]
