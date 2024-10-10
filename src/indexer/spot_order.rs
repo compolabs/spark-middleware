@@ -13,11 +13,9 @@ pub enum OrderType {
 #[derive(Debug, PartialEq, Eq, Clone, Copy, JsonSchema, Serialize, Deserialize)]
 pub enum OrderStatus {
     New,
-    InProgress,
-    PartiallyFilled,
-    Filled,
+    PartiallyMatched,
+    Matched,
     Cancelled,
-    Failed,
 }
 
 #[derive(Debug, Clone, JsonSchema, Serialize, Deserialize, Eq)]
@@ -25,7 +23,7 @@ pub struct SpotOrder {
     pub id: String,
     pub user: String,
     pub asset: String,
-    pub amount: u128,
+    pub amount: u128, 
     pub price: u128,
     pub timestamp: u64,
     pub order_type: OrderType,

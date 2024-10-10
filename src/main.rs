@@ -3,19 +3,10 @@ use error::Error;
 use futures_util::future::FutureExt;
 use futures_util::future::{join_all, select};
 use indexer::pangea::initialize_pangea_indexer;
-use indexer::{
-    envio::WebSocketClientEnvio, subsquid::WebSocketClientSubsquid,
-    pangea::start_pangea_indexer,
-};
-use log::info;
-use matchers::batch_processor::BatchProcessor;
-use matchers::websocket::MatcherWebSocket;
 use storage::order_book::OrderBook;
-use std::{collections::HashMap, sync::Arc};
-use tokio::net::TcpListener;
-use tokio::{signal, sync::mpsc};
-use url::Url;
 use web::server::rocket;
+use std::sync::Arc;
+use tokio::signal;
 
 pub mod config;
 pub mod error;
@@ -40,17 +31,13 @@ async fn main() -> Result<(), Error> {
         .active_indexers
         .contains(&"pangea".to_string())
     {
-        initialize_pangea_indexer(settings.clone(), &mut tasks, order_book).await?;
+        initialize_pangea_indexer(settings.clone(), &mut tasks, Arc::clone(&order_book)).await?;
     }
-    /*
     let rocket_task = tokio::spawn(run_rocket_server(
-        order_managers.clone(),
-        Arc::clone(&aggregator),
         Arc::clone(&settings),
-        Arc::clone(&order_metrics),
+        Arc::clone(&order_book),
     ));
     tasks.push(rocket_task);
-    */
 
     /*
     let matcher_task = tokio::spawn(run_matcher_server(
@@ -77,15 +64,14 @@ async fn main() -> Result<(), Error> {
     Ok(())
 }
 
-/*
 async fn run_rocket_server(
-    order_managers: HashMap<String, Arc<OrderManager>>,
-    aggregator: Arc<Aggregator>,
     settings: Arc<Settings>,
+    order_book: Arc<OrderBook>,
 ) {
-    let rocket = rocket(order_managers, aggregator, settings);
+    let rocket = rocket(settings, order_book);
     let _ = rocket.launch().await;
-}*/
+}
+
 /*
 async fn run_matcher_server(
     settings: Arc<Settings>,

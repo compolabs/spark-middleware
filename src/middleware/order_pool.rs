@@ -158,9 +158,10 @@ impl ShardedOrderPool {
 
             // Если ордер полностью исполнен или отменен, удаляем его из пула
             if let Some(new_status) = status {
+                /*
                 if new_status == OrderStatus::Filled || new_status == OrderStatus::Failed {
                     shard.remove_order(order_id, price, order_type).await;
-                }
+                }*/
             }
         } else {
             log::warn!(
@@ -329,6 +330,7 @@ impl ShardedOrderPool {
                     selected_orders.push(sell_order.clone());
 
                     // Устанавливаем статус ордеров на InProgress
+                    /*
                     self.update_order_status_internal(
                         &buy_order.id,
                         buy_order.price,
@@ -343,6 +345,7 @@ impl ShardedOrderPool {
                         OrderStatus::InProgress,
                     )
                     .await;
+                    */
                 }
             }
 

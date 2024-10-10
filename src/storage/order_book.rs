@@ -16,6 +16,7 @@ impl OrderBook {
         }
     }
 
+
     pub fn add_order(&self, order: SpotOrder) {
         let mut target_tree = match order.order_type {
             OrderType::Buy => self.buy_orders.write().unwrap(),
@@ -26,6 +27,7 @@ impl OrderBook {
             .or_insert(Vec::new())
             .push(order);
     }
+
 
     pub fn get_orders_in_range(
         &self,
@@ -44,11 +46,34 @@ impl OrderBook {
         result
     }
 
-    fn remove_order(&self, id: &str, order_type: OrderType) {
+
+    pub fn get_order(&self, id: &str, order_type: OrderType) -> Option<SpotOrder> {
+        let target_tree = match order_type {
+            OrderType::Buy => self.buy_orders.read().unwrap(),
+            OrderType::Sell => self.sell_orders.read().unwrap(),
+        };
+
+        for (_price, order_list) in target_tree.iter() {
+            if let Some(order) = order_list.iter().find(|o| o.id == id) {
+                return Some(order.clone());
+            }
+        }
+        None
+    }
+
+
+    pub fn update_order(&self, order: SpotOrder) {
+        self.remove_order(&order.id, order.order_type);
+        self.add_order(order);
+    }
+
+
+    pub fn remove_order(&self, id: &str, order_type: OrderType) {
         let mut target_tree = match order_type {
             OrderType::Buy => self.buy_orders.write().unwrap(),
             OrderType::Sell => self.sell_orders.write().unwrap(),
         };
+
         for (_price, order_list) in target_tree.iter_mut() {
             order_list.retain(|order| order.id != id);
         }
