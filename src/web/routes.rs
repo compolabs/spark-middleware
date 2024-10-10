@@ -1,15 +1,22 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use async_graphql::http::{playground_source, GraphQLPlaygroundConfig};
+use async_graphql::{EmptyMutation, EmptySubscription, Schema};
+use async_graphql_rocket::{GraphQLRequest, GraphQLResponse};
+use log::warn;
 use rocket::request::FromParam;
+use rocket::response::content;
 use rocket::serde::json::Json;
-use rocket::{get, Route, State};
+use rocket::{get, routes, Route, State};
 use rocket_okapi::swagger_ui::SwaggerUIConfig;
 use rocket_okapi::{openapi, openapi_get_routes, JsonSchema};
 use serde::{Deserialize, Serialize};
 
 use crate::indexer::spot_order::{OrderType, SpotOrder};
 use crate::storage::order_book::OrderBook;
+
+use super::graphql::Query;
 
 
 #[derive(Serialize, JsonSchema)]
@@ -114,13 +121,34 @@ pub fn get_orders_count(order_book: &State<Arc<OrderBook>>) -> Json<HashMap<Stri
     Json(counts)
 }
 
+
+#[rocket::post("/graphql", data = "<request>")]
+pub async fn graphql_handler(
+    schema: &State<Schema<Query, EmptyMutation, EmptySubscription>>,
+    request: GraphQLRequest,
+) -> GraphQLResponse {
+    request.execute(&**schema).await  // Разыменовываем State
+}
+
+#[rocket::get("/graphql/playground")]
+pub fn graphql_playground() -> content::RawHtml<String> {
+    warn!("======GQPLGRND========");
+    let gqlpgc = GraphQLPlaygroundConfig::new("/api/graphql");
+
+    content::RawHtml(playground_source(gqlpgc))
+}
+
 pub fn get_routes() -> Vec<Route> {
     openapi_get_routes![
         get_buy_orders,
         get_sell_orders,
         get_indexer_spread,
-        get_orders_count
+        get_orders_count,
     ]
+}
+
+pub fn get_graphql_routes() -> Vec<Route> {
+    routes![graphql_handler, graphql_playground]
 }
 
 pub fn get_docs() -> SwaggerUIConfig {
