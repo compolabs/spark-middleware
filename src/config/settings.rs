@@ -27,6 +27,7 @@ pub struct WebSocketSettings {
 #[derive(Debug, Clone, Deserialize)]
 pub struct ContractSettings {
     pub contract_id: String,
+    pub contract_block: i64,
     pub order_limit: i32,
 }
 

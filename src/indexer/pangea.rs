@@ -1,11 +1,13 @@
-use log::{error, info};
-use serde::Deserialize;
-use serde::Serialize;
+use ethers_core::types::H256;
+use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
+use std::str::FromStr;
 use std::sync::Arc;
 use pangea_client::{
     futures::StreamExt, provider::FuelProvider, query::Bound, requests::fuel::GetSparkOrderRequest,
     ClientBuilder, Format, WsProvider,
 };
+use log::{info, error};
 
 use crate::config::settings::Settings;
 use crate::error::Error;
@@ -73,10 +75,14 @@ pub async fn start_pangea_indexer(
     info!("Pangea ws client created. Trying to connect");
 
     let mut last_processed_block: i64 = 0;
+    let contract_start_block: i64 = config.contract.contract_block;
+    let contract_h256 = H256::from_str(&config.contract.contract_id).unwrap(); //NTD Remove unwrap
 
     let request_all = GetSparkOrderRequest {
+       // from_block: Bound::Exact(contract_start_block),
         from_block: Bound::FromLatest(10000),
         to_block: Bound::Latest,
+        //market_id__in: HashSet::from([contract_h256]),
         ..Default::default()
     };
 
@@ -112,6 +118,7 @@ pub async fn start_pangea_indexer(
         let request_deltas = GetSparkOrderRequest {
             from_block: Bound::Exact(last_processed_block + 1),
             to_block: Bound::Latest,
+            //market_id__in: HashSet::from([contract_h256]),
             ..Default::default()
         };
 
@@ -128,7 +135,6 @@ pub async fn start_pangea_indexer(
                     let data = String::from_utf8(data).unwrap();
                     let order: PangeaOrderEvent = serde_json::from_str(&data).unwrap();
                     last_processed_block = order.block_number;
-
 
                     handle_order_event(order_book.clone(), order).await;
                 },
@@ -147,6 +153,7 @@ pub async fn start_pangea_indexer(
 
 pub async fn handle_order_event(order_book: Arc<OrderBook>, event: PangeaOrderEvent) {
     if let Some(event_type) = event.event_type.as_deref() {
+        info!("event {:?}", event);
         match event_type {
             "Open" => {
                 if let Some(order) = create_new_order_from_event(&event) {
@@ -155,9 +162,13 @@ pub async fn handle_order_event(order_book: Arc<OrderBook>, event: PangeaOrderEv
                 }
             }
             "Trade" => {
+                info!("=======");
+                info!("trade event");
                 if let Some(match_size) = event.amount {
+                    info!("processed!");
                     process_trade(&order_book, &event.order_id, match_size, event.order_type_to_enum());
                 }
+                info!("=======");
             }
             "Cancel" => {
                 // Удаляем ордер, если он был отменён
@@ -203,6 +214,7 @@ fn create_new_order_from_event(event: &PangeaOrderEvent) -> Option<SpotOrder> {
 
 
 pub fn process_trade(order_book: &OrderBook, order_id: &str, trade_amount: u128, order_type: OrderType) {
+    println!("trade event for {:?}", trade_amount);
     if let Some(mut order) = order_book.get_order(order_id, order_type) {
         if order.amount > trade_amount {
             order.amount -= trade_amount; // Частично исполнен
