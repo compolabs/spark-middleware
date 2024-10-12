@@ -63,19 +63,46 @@ impl OrderBook {
 
 
     pub fn update_order(&self, order: SpotOrder) {
-        self.remove_order(&order.id, order.order_type);
+        self.remove_order(&order.id, Some(order.order_type));
         self.add_order(order);
     }
 
 
-    pub fn remove_order(&self, id: &str, order_type: OrderType) {
-        let mut target_tree = match order_type {
-            OrderType::Buy => self.buy_orders.write().unwrap(),
-            OrderType::Sell => self.sell_orders.write().unwrap(),
-        };
+    pub fn remove_order(&self, id: &str, order_type: Option<OrderType>) {
+        match order_type {
+            Some(order_type) => {
+                let mut target_tree = match order_type {
+                    OrderType::Buy => self.buy_orders.write().unwrap(),
+                    OrderType::Sell => self.sell_orders.write().unwrap(),
+                };
+                self.remove_order_from_tree(&mut target_tree, id);
+            }
+            None => {
+                {
+                    let mut buy_tree = self.buy_orders.write().unwrap();
+                    self.remove_order_from_tree(&mut buy_tree, id);
+                }
+                {
+                    let mut sell_tree = self.sell_orders.write().unwrap();
+                    self.remove_order_from_tree(&mut sell_tree, id);
+                }
+            }
+        }
+    }
 
-        for (_price, order_list) in target_tree.iter_mut() {
+    fn remove_order_from_tree(&self, target_tree: &mut BTreeMap<u128, Vec<SpotOrder>>, id: &str) {
+        let mut empty_keys = Vec::new();
+
+        for (&price, order_list) in target_tree.iter_mut() {
+            let original_len = order_list.len();
             order_list.retain(|order| order.id != id);
+            if order_list.is_empty() {
+                empty_keys.push(price);
+            }
+        }
+
+        for key in empty_keys {
+            target_tree.remove(&key);
         }
     }
 }

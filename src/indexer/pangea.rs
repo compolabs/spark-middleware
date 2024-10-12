@@ -1,4 +1,5 @@
 use ethers_core::types::H256;
+use log::warn;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::str::FromStr;
@@ -79,10 +80,9 @@ pub async fn start_pangea_indexer(
     let contract_h256 = H256::from_str(&config.contract.contract_id).unwrap(); //NTD Remove unwrap
 
     let request_all = GetSparkOrderRequest {
-       // from_block: Bound::Exact(contract_start_block),
-        from_block: Bound::FromLatest(10000),
+        from_block: Bound::Exact(contract_start_block),
         to_block: Bound::Latest,
-        //market_id__in: HashSet::from([contract_h256]),
+        market_id__in: HashSet::from([contract_h256]),
         ..Default::default()
     };
 
@@ -101,7 +101,6 @@ pub async fn start_pangea_indexer(
                 let order: PangeaOrderEvent = serde_json::from_str(&data).unwrap();
                 last_processed_block = order.block_number;
 
-                // Обработка события на основе типа события
                 handle_order_event(order_book.clone(), order).await;
 
             },
@@ -118,7 +117,7 @@ pub async fn start_pangea_indexer(
         let request_deltas = GetSparkOrderRequest {
             from_block: Bound::Exact(last_processed_block + 1),
             to_block: Bound::Latest,
-            //market_id__in: HashSet::from([contract_h256]),
+            market_id__in: HashSet::from([contract_h256]),
             ..Default::default()
         };
 
@@ -153,25 +152,24 @@ pub async fn start_pangea_indexer(
 
 pub async fn handle_order_event(order_book: Arc<OrderBook>, event: PangeaOrderEvent) {
     if let Some(event_type) = event.event_type.as_deref() {
-        info!("event {:?}", event);
+        if event.order_id == "0xe887312d717eeb1672d86337584f47b76ae0847d1f9ceaf6da9a3f2beba608d5" {
+            warn!("==========");
+            warn!("{:?}", &event);
+            warn!("==========");
+        }
         match event_type {
             "Open" => {
                 if let Some(order) = create_new_order_from_event(&event) {
                     order_book.add_order(order);
-                    info!("Added new order with id: {}", event.order_id);
+                    //info!("Added new order with id: {}", event.order_id);
                 }
             }
             "Trade" => {
-                info!("=======");
-                info!("trade event");
                 if let Some(match_size) = event.amount {
-                    info!("processed!");
                     process_trade(&order_book, &event.order_id, match_size, event.order_type_to_enum());
                 }
-                info!("=======");
             }
             "Cancel" => {
-                // Удаляем ордер, если он был отменён
                 order_book.remove_order(&event.order_id, event.order_type_to_enum());
                 info!("Removed order with id: {} due to Cancel event", event.order_id);
             }
@@ -213,33 +211,40 @@ fn create_new_order_from_event(event: &PangeaOrderEvent) -> Option<SpotOrder> {
 
 
 
-pub fn process_trade(order_book: &OrderBook, order_id: &str, trade_amount: u128, order_type: OrderType) {
-    println!("trade event for {:?}", trade_amount);
-    if let Some(mut order) = order_book.get_order(order_id, order_type) {
-        if order.amount > trade_amount {
-            order.amount -= trade_amount; // Частично исполнен
-            order.status = Some(OrderStatus::PartiallyMatched);
-            order_book.update_order(order.clone());
-            info!(
-                "Updated order with id: {} - partially matched, remaining amount: {}",
-                order_id, order.amount
-            );
-        } else {
-            order.status = Some(OrderStatus::Matched);
-            order_book.remove_order(order_id, order_type);
-            info!("Removed order with id: {} - fully matched", order_id);
+pub fn process_trade(order_book: &OrderBook, order_id: &str, trade_amount: u128, order_type: Option<OrderType>) {
+    match order_type {
+        Some(order_type) => {
+            if let Some(mut order) = order_book.get_order(order_id, order_type) {
+                if order.amount > trade_amount {
+                    order.amount -= trade_amount;
+                    order.status = Some(OrderStatus::PartiallyMatched);
+                    order_book.update_order(order.clone());
+                    /*
+                    info!(
+                        "Updated order with id: {} - partially matched, remaining amount: {}",
+                        order_id, order.amount
+                    );*/
+                } else {
+                    order.status = Some(OrderStatus::Matched);
+                    order_book.remove_order(order_id, Some(order_type));
+                    //info!("Removed order with id: {} - fully matched", order_id);
+                }
+            } else {
+                error!("Order with id: {} not found for trade event", order_id);
+            }
         }
-    } else {
-        error!("Order with id: {} not found for trade event", order_id);
+        None => {
+            error!("Order type is None for order_id: {}. Cannot process trade event.", order_id);
+        }
     }
 }
 
 impl PangeaOrderEvent {
-    fn order_type_to_enum(&self) -> OrderType {
-        match self.order_type.as_deref() {
-            Some("Buy") => OrderType::Buy,
-            Some("Sell") => OrderType::Sell,
-            _ => OrderType::Buy,
-        }
+    fn order_type_to_enum(&self) -> Option<OrderType> {
+        self.order_type.as_deref().and_then(|order_type| match order_type {
+            "Buy" => Some(OrderType::Buy),
+            "Sell" => Some(OrderType::Sell),
+            _ => None,
+        })
     }
 }
