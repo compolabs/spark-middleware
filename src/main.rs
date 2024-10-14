@@ -3,7 +3,10 @@ use error::Error;
 use futures_util::future::FutureExt;
 use futures_util::future::{join_all, select};
 use indexer::pangea::initialize_pangea_indexer;
+use matchers::websocket::MatcherWebSocket;
 use storage::order_book::OrderBook;
+use tokio::net::TcpListener;
+use tokio_tungstenite::accept_async;
 use web::server::rocket;
 use std::sync::Arc;
 use tokio::signal;
@@ -39,14 +42,11 @@ async fn main() -> Result<(), Error> {
     ));
     tasks.push(rocket_task);
 
-    /*
-    let matcher_task = tokio::spawn(run_matcher_server(
-        settings.clone(),
-        Arc::clone(&envio_manager.order_pool),
-        order_metrics,
+    let matcher_websocket = Arc::new(MatcherWebSocket::new(settings.clone(), order_book.clone()));
+    let matcher_ws_task = tokio::spawn(run_matcher_websocket_server(
+        matcher_websocket.clone(),
     ));
-    tasks.push(matcher_task);
-    */
+    tasks.push(matcher_ws_task);
 
     let ctrl_c_task = tokio::spawn(async {
         signal::ctrl_c().await.expect("failed to listen for event");
@@ -72,37 +72,15 @@ async fn run_rocket_server(
     let _ = rocket.launch().await;
 }
 
-/*
-async fn run_matcher_server(
-    settings: Arc<Settings>,
-    order_pool: Arc<ShardedOrderPool>,
-) {
-    let listener = TcpListener::bind(&settings.matchers.matcher_ws_url)
-        .await
-        .unwrap();
-    let matcher_websocket = Arc::new(MatcherWebSocket::new(
-        settings.clone(),
-        BatchProcessor::new(settings.clone()),
-    ));
-
-    info!(
-        "Matcher WebSocket server started at {}",
-        &settings.matchers.matcher_ws_url
-    );
+async fn run_matcher_websocket_server(matcher_websocket: Arc<MatcherWebSocket>) {
+    let listener = TcpListener::bind("0.0.0.0:9001").await.expect("Can't bind WebSocket port");
 
     while let Ok((stream, _)) = listener.accept().await {
-        let ws_stream = tokio_tungstenite::accept_async(stream)
-            .await
-            .expect("Error during WebSocket handshake");
-
-        let matcher_websocket = Arc::clone(&matcher_websocket);
-        let order_pool_clone = Arc::clone(&order_pool);
+        let matcher_websocket_clone = matcher_websocket.clone();
 
         tokio::spawn(async move {
-            matcher_websocket
-                .handle_connection(ws_stream, order_pool_clone)
-                .await;
+            let ws_stream = accept_async(stream).await.expect("Error during WebSocket handshake");
+            matcher_websocket_clone.handle_connection(ws_stream).await;
         });
     }
 }
-*/

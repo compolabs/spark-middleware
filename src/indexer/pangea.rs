@@ -79,6 +79,7 @@ pub async fn start_pangea_indexer(
     let mut last_processed_block: i64 = 0;
     let contract_start_block: i64 = config.contract.contract_block;
     let contract_h256 = H256::from_str(&config.contract.contract_id).unwrap(); //NTD Remove unwrap
+    let threshold = config.websockets.pangea_buy_threshold as u128; 
 
     let request_all = GetSparkOrderRequest {
         from_block: Bound::Exact(contract_start_block),
@@ -101,8 +102,18 @@ pub async fn start_pangea_indexer(
                 let data = String::from_utf8(data).unwrap();
                 let order: PangeaOrderEvent = serde_json::from_str(&data).unwrap();
                 last_processed_block = order.block_number;
-
-                handle_order_event(order_book.clone(), order).await;
+                match order.amount {
+                    Some(amount) => {
+                        if amount > threshold {
+                            handle_order_event(order_book.clone(), order).await;
+                        } else {
+                            warn!("Skipping order {:?}, amount: {:?} less {:?}", order.order_id, order.amount, threshold);
+                        }
+                    }
+                    None => {
+                        warn!("Skipping order {:?}, amount None", order.order_id);
+                    } 
+                }
 
             },
             Err(e) => {
@@ -135,7 +146,19 @@ pub async fn start_pangea_indexer(
                     let data = String::from_utf8(data).unwrap();
                     let order: PangeaOrderEvent = serde_json::from_str(&data).unwrap();
                     last_processed_block = order.block_number;
-                    handle_order_event(order_book.clone(), order).await;
+                    match order.amount {
+                        Some(amount) => {
+                            if amount > threshold {
+                                handle_order_event(order_book.clone(), order).await;
+                            } else {
+                                warn!("Skipping order {:?}, amount: {:?} less {:?}", order.order_id, order.amount, threshold);
+                            }
+                        }
+                        None => {
+                            warn!("Skipping order {:?}, amount None", order.order_id);
+                        } 
+                    }
+
                 },
                 Err(e) => {
                     error!("Error in the stream of new orders (deltas): {e}");

@@ -1,121 +1,88 @@
 use crate::config::settings::Settings;
-use crate::matchers::batch_processor::BatchProcessor;
-use crate::matchers::types::{
-    MatcherConnectRequest, MatcherRequest, MatcherResponse,
-};
-use crate::middleware::order_pool::ShardedOrderPool;
-use futures_util::{SinkExt, StreamExt};
-use log::{error, info};
+use crate::matchers::types::{MatcherRequest, MatcherResponse};
+use crate::storage::order_book::OrderBook;
+use crate::indexer::spot_order::{OrderType, SpotOrder};
+use futures_util::{StreamExt, SinkExt};
+use log::error;
+use std::collections::HashSet;
 use std::sync::Arc;
-use tokio::net::TcpStream;
+use tokio::sync::Mutex;
 use tokio_tungstenite::tungstenite::protocol::Message;
 use tokio_tungstenite::WebSocketStream;
+use tokio::net::TcpStream;
 
 pub struct MatcherWebSocket {
     pub settings: Arc<Settings>,
-    pub batch_processor: Arc<BatchProcessor>,
+    pub order_book: Arc<OrderBook>,
+    pub matching_orders: Arc<Mutex<HashSet<String>>>,  // Храним ID ордеров, которые в процессе матчинга
 }
 
 impl MatcherWebSocket {
-    pub fn new(settings: Arc<Settings>, batch_processor: Arc<BatchProcessor>) -> Self {
+    pub fn new(settings: Arc<Settings>, order_book: Arc<OrderBook>) -> Self {
         Self {
             settings,
-            batch_processor,
+            order_book,
+            matching_orders: Arc::new(Mutex::new(HashSet::new())),
         }
     }
 
     pub async fn handle_connection(
         self: Arc<Self>,
         ws_stream: WebSocketStream<TcpStream>,
-        order_pool: Arc<ShardedOrderPool>,
     ) {
-        // Разделяем поток на write и read
-        let (write, mut read) = ws_stream.split();
+        let (mut write, mut read) = ws_stream.split();
 
-        // Первое сообщение должно быть идентификацией
-        if let Some(Ok(message)) = read.next().await {
+        // Основной цикл обработки сообщений от клиента
+        while let Some(Ok(message)) = read.next().await {
             if let Message::Text(text) = message {
-                if let Ok(MatcherConnectRequest { uuid }) = serde_json::from_str(&text) {
-                    info!("Matcher with UUID {} connected", uuid);
-
-                    let self_clone = self.clone();
-                    let order_pool_clone = order_pool.clone();
-
-                    // Запускаем обработку сообщений в отдельной задаче
-                    tokio::spawn(async move {
-                        self_clone
-                            .process_messages(uuid, write, read, order_pool_clone)
-                            .await;
-                    });
-                } else {
-                    error!("Invalid matcher connect request format");
+                match serde_json::from_str::<MatcherRequest>(&text) {
+                    Ok(MatcherRequest::BatchRequest(_)) => {
+                        // Формируем батч ордеров для матчинга
+                        let batch_size = self.settings.matchers.batch_size;
+                        let available_orders = self.get_available_orders(batch_size).await;
+                        
+                        let response = MatcherResponse::Batch(available_orders);
+                        let response_text = serde_json::to_string(&response).unwrap();
+                        
+                        if let Err(e) = write.send(Message::Text(response_text)).await {
+                            error!("Failed to send batch to matcher: {}", e);
+                        }
+                    }
+                    _ => {
+                        error!("Invalid message format received");
+                    }
                 }
-            } else {
-                error!("Expected text message from matcher");
             }
-        } else {
-            error!("Expected identification message from matcher");
         }
     }
 
-    async fn process_messages(
-        &self,
-        uuid: String,
-        mut write: impl SinkExt<Message, Error = tokio_tungstenite::tungstenite::Error> + Unpin,
-        mut read: impl StreamExt<Item = Result<Message, tokio_tungstenite::tungstenite::Error>> + Unpin,
-        order_pool: Arc<ShardedOrderPool>,
-    ) {
-        while let Some(message) = read.next().await {
-            match message {
-                Ok(Message::Text(text)) => {
-                    match serde_json::from_str::<MatcherRequest>(&text) {
-                        Ok(MatcherRequest::BatchRequest(_)) => {
-                            // Формируем батч и отправляем матчеру
-                            let batch_size = self.settings.matchers.batch_size;
-                            if let Some(batch) = self
-                                .batch_processor
-                                .form_batch(batch_size, order_pool.clone())
-                                .await
-                            {
-                                let response = MatcherResponse::Batch(batch);
-                                let response_text = serde_json::to_string(&response).unwrap();
-                                if let Err(e) = write.send(Message::Text(response_text)).await {
-                                    error!("Failed to send batch to matcher {}: {}", uuid, e);
-                                    break;
-                                }
-                            } else {
-                                info!("No orders available to form a batch for matcher {}", uuid);
-                                // Можно отправить пустой батч или специальное сообщение
-                            }
-                        }
-                        Ok(MatcherRequest::OrderUpdates(order_updates)) => {
-                            // Обновляем статусы ордеров в пуле
-                            order_pool.update_order_status(order_updates).await;
-                            // Отправляем подтверждение (опционально)
-                            let ack = MatcherResponse::Ack;
-                            let ack_text = serde_json::to_string(&ack).unwrap();
-                            if let Err(e) = write.send(Message::Text(ack_text)).await {
-                                error!("Failed to send ack to matcher {}: {}", uuid, e);
-                                break;
-                            }
-                        }
-                        Err(e) => {
-                            error!("Failed to parse message from matcher {}: {}", uuid, e);
-                        }
-                    }
-                }
-                Ok(Message::Close(_)) => {
-                    info!("Matcher {} disconnected", uuid);
-                    break;
-                }
-                Err(e) => {
-                    error!("WebSocket error with matcher {}: {}", uuid, e);
-                    break;
-                }
-                _ => {
-                    error!("Unexpected message format from matcher {}", uuid);
-                }
-            }
+    // Метод для получения батча ордеров, которые не находятся в процессе матчинга
+    async fn get_available_orders(&self, batch_size: usize) -> Vec<SpotOrder> {
+        let mut matching_orders = self.matching_orders.lock().await;
+        let mut available_orders = Vec::new();
+
+        // Получаем все ордера из OrderBook, которые не в MatchingOrders
+        let orders = self.order_book.get_orders_in_range(0, u128::MAX, OrderType::Buy)
+            .into_iter()
+            .chain(self.order_book.get_orders_in_range(0, u128::MAX, OrderType::Sell))
+            .filter(|order| !matching_orders.contains(&order.id))
+            .take(batch_size)
+            .collect::<Vec<_>>();
+
+        // Добавляем ордера в matching_orders
+        for order in &orders {
+            matching_orders.insert(order.id.clone());
         }
+
+        available_orders
+    }
+
+    // Метод для обработки обновления ордера
+    pub async fn update_order(&self, order: SpotOrder) {
+        self.order_book.update_order(order.clone());
+        
+        // Удаляем из MatchingOrders, если он там есть
+        let mut matching_orders = self.matching_orders.lock().await;
+        matching_orders.remove(&order.id);
     }
 }

@@ -22,6 +22,8 @@ pub struct WebSocketSettings {
     pub pangea_username: String,
     pub pangea_pass: String,
     pub pangea_url: String,
+    pub pangea_buy_threshold: u64,
+    pub pangea_sell_threshold: u64,
 }
 
 #[derive(Debug, Clone, Deserialize)]
