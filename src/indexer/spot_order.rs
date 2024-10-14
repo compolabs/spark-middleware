@@ -11,6 +11,13 @@ pub enum OrderType {
 }
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy, JsonSchema, Serialize, Deserialize)]
+pub enum LimitType {
+    FOK,
+    IOC,
+    GTC,
+}
+
+#[derive(Debug, PartialEq, Eq, Clone, Copy, JsonSchema, Serialize, Deserialize)]
 pub enum OrderStatus {
     New,
     PartiallyMatched,

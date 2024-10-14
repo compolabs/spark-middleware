@@ -17,6 +17,8 @@ use crate::indexer::spot_order::OrderType;
 use crate::indexer::spot_order::SpotOrder;
 use crate::storage::order_book::OrderBook;
 
+use super::spot_order::LimitType;
+
 #[derive(Debug, Deserialize, Serialize)]
 pub struct PangeaOrderEvent {
     chain: u64,
@@ -36,9 +38,7 @@ pub struct PangeaOrderEvent {
     user: Option<String>,
     order_matcher: Option<String>,
     owner: Option<String>,
-    counterparty: Option<String>,
-    match_size: Option<u128>,
-    match_price: Option<u128>,
+    limit_type: Option<String>
 }
 
 
@@ -134,7 +134,6 @@ pub async fn start_pangea_indexer(
                     let data = String::from_utf8(data).unwrap();
                     let order: PangeaOrderEvent = serde_json::from_str(&data).unwrap();
                     last_processed_block = order.block_number;
-
                     handle_order_event(order_book.clone(), order).await;
                 },
                 Err(e) => {
@@ -149,14 +148,22 @@ pub async fn start_pangea_indexer(
     }
 }
 
-
 pub async fn handle_order_event(order_book: Arc<OrderBook>, event: PangeaOrderEvent) {
     if let Some(event_type) = event.event_type.as_deref() {
+        /* 
         if event.order_id == "0xe887312d717eeb1672d86337584f47b76ae0847d1f9ceaf6da9a3f2beba608d5" {
+            warn!("========== xe8");
+            warn!("{:?}", &event);
+            warn!("==========");
+        }*/
+        
+        /*
+        if event.order_id == "0xd032a66d3dbd62ce031d602ca18ac958e85f0d582684cf5ca96dd5497645f473" {
             warn!("==========");
             warn!("{:?}", &event);
             warn!("==========");
         }
+        */
         match event_type {
             "Open" => {
                 if let Some(order) = create_new_order_from_event(&event) {
@@ -166,7 +173,9 @@ pub async fn handle_order_event(order_book: Arc<OrderBook>, event: PangeaOrderEv
             }
             "Trade" => {
                 if let Some(match_size) = event.amount {
-                    process_trade(&order_book, &event.order_id, match_size, event.order_type_to_enum());
+                    let o_type = event.order_type_to_enum();
+                    let l_type = event.limit_type_to_enum();
+                    process_trade(&order_book, &event.order_id, match_size, o_type, l_type);
                 }
             }
             "Cancel" => {
@@ -211,26 +220,38 @@ fn create_new_order_from_event(event: &PangeaOrderEvent) -> Option<SpotOrder> {
 
 
 
-pub fn process_trade(order_book: &OrderBook, order_id: &str, trade_amount: u128, order_type: Option<OrderType>) {
+pub fn process_trade(order_book: &OrderBook, order_id: &str, trade_amount: u128, order_type: Option<OrderType>, limit_type: Option<LimitType>) {
     match order_type {
-        Some(order_type) => {
-            if let Some(mut order) = order_book.get_order(order_id, order_type) {
-                if order.amount > trade_amount {
-                    order.amount -= trade_amount;
-                    order.status = Some(OrderStatus::PartiallyMatched);
-                    order_book.update_order(order.clone());
-                    /*
-                    info!(
-                        "Updated order with id: {} - partially matched, remaining amount: {}",
-                        order_id, order.amount
-                    );*/
-                } else {
-                    order.status = Some(OrderStatus::Matched);
-                    order_book.remove_order(order_id, Some(order_type));
-                    //info!("Removed order with id: {} - fully matched", order_id);
+        Some(order_type) => match limit_type {
+            Some(limit_type) => {
+                match limit_type {
+                    LimitType::GTC => {
+                        if let Some(mut order) = order_book.get_order(order_id, order_type) {
+                            if order.amount > trade_amount {
+                                order.amount -= trade_amount;
+                                order.status = Some(OrderStatus::PartiallyMatched);
+                                order_book.update_order(order.clone());
+                                info!(
+                                    "Updated order with id: {} - partially matched, remaining amount: {}",
+                                    order_id, order.amount
+                                );
+                            } else {
+                                order.status = Some(OrderStatus::Matched);
+                                order_book.remove_order(order_id, Some(order_type));
+                                info!("Removed order with id: {} - fully matched", order_id);
+                            }
+                        } else {
+                            error!("Order with id: {} not found for trade event", order_id);
+                        }
+                    }
+                    _ => {
+                        order_book.remove_order(order_id, Some(order_type));
+                        info!("Removed order with id: {} - FOK matched", order_id);
+                    }
                 }
-            } else {
-                error!("Order with id: {} not found for trade event", order_id);
+            }
+            None => {
+                error!("Limit type is None for order_id: {}. Cannot process trade event.", order_id);
             }
         }
         None => {
@@ -244,6 +265,15 @@ impl PangeaOrderEvent {
         self.order_type.as_deref().and_then(|order_type| match order_type {
             "Buy" => Some(OrderType::Buy),
             "Sell" => Some(OrderType::Sell),
+            _ => None,
+        })
+    }
+
+    fn limit_type_to_enum(&self) -> Option<LimitType> {
+        self.limit_type.as_deref().and_then(|limit_type| match limit_type {
+            "FOK" => Some(LimitType::FOK),
+            "IOC" => Some(LimitType::IOC),
+            "GTC" => Some(LimitType::GTC),
             _ => None,
         })
     }
