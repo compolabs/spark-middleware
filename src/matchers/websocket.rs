@@ -45,6 +45,7 @@ impl MatcherWebSocket {
                         self.handle_order_updates(order_updates).await;
                     }
                     _ => {
+                        error!("{:?}",text);
                         error!("Invalid message format received");
                     }
                 }
@@ -80,67 +81,116 @@ impl MatcherWebSocket {
         &self,
         order_updates: Vec<MatcherOrderUpdate>,
     ) {
-        
+        let mut matching_orders = self.matching_orders.lock().await;
+
         for update in order_updates {
-            let order = SpotOrder {
-                id: update.order_id.clone(),
-                amount: update.new_amount,
-                price: update.price,
-                order_type: update.order_type,
-                timestamp: update.timestamp,
-                status: update.status,
-                user: String::new(), 
-                asset: String::new(),
-            };
-            self.update_order(order).await;
+            matching_orders.remove(&update.order_id);
         }
     }
 
     async fn get_available_orders(&self, batch_size: usize) -> Vec<SpotOrder> {
-        let mut matching_orders = self.matching_orders.lock().await;
         let mut available_orders = Vec::new();
 
-        let buy_orders = self.order_book.get_buy_orders();  
-        let sell_orders = self.order_book.get_sell_orders();  
+        // Получаем снимок matching_orders
+        let matching_order_ids = {
+            let matching_orders = self.matching_orders.lock().await;
+            matching_orders.clone() // Предполагается, что matching_orders: HashSet<String>
+        };
+        // matching_order_ids теперь имеет тип HashSet<String>
 
-        let mut buy_iter = buy_orders.iter().rev();  
-        let mut sell_iter = sell_orders.iter();      
+        // Получаем копии buy_orders и sell_orders
+        let buy_orders = {
+            let buy_orders_lock = self.order_book.get_buy_orders();
+            buy_orders_lock
+                .values()
+                .flat_map(|orders| orders.iter().cloned())
+                .collect::<Vec<_>>()
+        };
 
-        let mut buy_cursor = buy_iter.next();
-        let mut sell_cursor = sell_iter.next();
+        let sell_orders = {
+            let sell_orders_lock = self.order_book.get_sell_orders();
+            sell_orders_lock
+                .values()
+                .flat_map(|orders| orders.iter().cloned())
+                .collect::<Vec<_>>()
+        };
 
-        while let (Some((buy_price, buy_list)), Some((sell_price, sell_list))) = (buy_cursor, sell_cursor) {
-            if *buy_price >= *sell_price {
-                
-                for buy_order in buy_list {
-                    if matching_orders.contains(&buy_order.id) {
-                        continue; 
-                    }
+        // Теперь мы освободили RwLockReadGuard и можем продолжать без проблем
 
-                    for sell_order in sell_list {
-                        if matching_orders.contains(&sell_order.id) {
-                            continue; 
-                        }
+        // Фильтруем ордера, исключая те, которые уже находятся в matching_orders
+        let mut buy_queue: Vec<SpotOrder> = buy_orders
+            .into_iter()
+            .filter(|order| !matching_order_ids.contains(&order.id))
+            .collect();
 
-                        
-                        available_orders.push(buy_order.clone());
-                        available_orders.push(sell_order.clone());
+        let mut sell_queue: Vec<SpotOrder> = sell_orders
+            .into_iter()
+            .filter(|order| !matching_order_ids.contains(&order.id))
+            .collect();
 
-                        matching_orders.insert(buy_order.id.clone());
-                        matching_orders.insert(sell_order.id.clone());
+        // Сортируем очереди
+        buy_queue.sort_by_key(|o| (std::cmp::Reverse(o.price), o.timestamp));
+        sell_queue.sort_by_key(|o| (o.price, o.timestamp));
 
-                        if available_orders.len() >= batch_size {
-                            return available_orders;
-                        }
-                    }
+        let mut buy_index = 0;
+        let mut sell_index = 0;
+
+        let mut new_matching_order_ids = Vec::new();
+
+        while buy_index < buy_queue.len()
+            && sell_index < sell_queue.len()
+            && available_orders.len() < batch_size
+        {
+            let buy_order = &buy_queue[buy_index];
+            let sell_order = &sell_queue[sell_index];
+
+            // Проверяем, подходит ли цена
+            if buy_order.price >= sell_order.price {
+                // Определяем объем исполнения
+                let trade_amount = std::cmp::min(buy_order.amount, sell_order.amount);
+
+                // Создаем новые ордера с объемом исполнения
+                let mut matched_buy_order = buy_order.clone();
+                matched_buy_order.amount = trade_amount;
+
+                let mut matched_sell_order = sell_order.clone();
+                matched_sell_order.amount = trade_amount;
+
+                // Добавляем ордера в батч
+                available_orders.push(matched_buy_order);
+                available_orders.push(matched_sell_order);
+
+                // Добавляем идентификаторы ордеров в new_matching_order_ids
+                new_matching_order_ids.push(buy_order.id.clone());
+                new_matching_order_ids.push(sell_order.id.clone());
+
+                // Обновляем объемы в очередях
+                buy_queue[buy_index].amount -= trade_amount;
+                sell_queue[sell_index].amount -= trade_amount;
+
+                // Если объем ордера исчерпан, переходим к следующему
+                if buy_queue[buy_index].amount == 0 {
+                    buy_index += 1;
                 }
 
-                
-                buy_cursor = buy_iter.next();
-                sell_cursor = sell_iter.next();
+                if sell_queue[sell_index].amount == 0 {
+                    sell_index += 1;
+                }
+
+                if available_orders.len() >= batch_size {
+                    break;
+                }
             } else {
-                
-                buy_cursor = buy_iter.next();
+                // Цены не пересекаются, переходим к следующему покупателю
+                buy_index += 1;
+            }
+        }
+
+        // Теперь обновляем matching_orders, добавляя новые идентификаторы
+        {
+            let mut matching_orders = self.matching_orders.lock().await;
+            for order_id in new_matching_order_ids {
+                matching_orders.insert(order_id);
             }
         }
 

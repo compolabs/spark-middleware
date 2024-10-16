@@ -23,6 +23,7 @@ pub enum OrderStatus {
     PartiallyMatched,
     Matched,
     Cancelled,
+    Failed,
 }
 
 #[derive(Debug, Clone, JsonSchema, Serialize, Deserialize, Eq)]
