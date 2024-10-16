@@ -11,10 +11,12 @@ use tokio_tungstenite::tungstenite::protocol::Message;
 use tokio_tungstenite::WebSocketStream;
 use tokio::net::TcpStream;
 
+use super::types::MatcherOrderUpdate;
+
 pub struct MatcherWebSocket {
     pub settings: Arc<Settings>,
     pub order_book: Arc<OrderBook>,
-    pub matching_orders: Arc<Mutex<HashSet<String>>>,  // Храним ID ордеров, которые в процессе матчинга
+    pub matching_orders: Arc<Mutex<HashSet<String>>>,  
 }
 
 impl MatcherWebSocket {
@@ -32,21 +34,15 @@ impl MatcherWebSocket {
     ) {
         let (mut write, mut read) = ws_stream.split();
 
-        // Основной цикл обработки сообщений от клиента
+        
         while let Some(Ok(message)) = read.next().await {
             if let Message::Text(text) = message {
                 match serde_json::from_str::<MatcherRequest>(&text) {
                     Ok(MatcherRequest::BatchRequest(_)) => {
-                        // Формируем батч ордеров для матчинга
-                        let batch_size = self.settings.matchers.batch_size;
-                        let available_orders = self.get_available_orders(batch_size).await;
-                        
-                        let response = MatcherResponse::Batch(available_orders);
-                        let response_text = serde_json::to_string(&response).unwrap();
-                        
-                        if let Err(e) = write.send(Message::Text(response_text)).await {
-                            error!("Failed to send batch to matcher: {}", e);
-                        }
+                        self.handle_batch_request(&mut write).await;
+                    }
+                    Ok(MatcherRequest::OrderUpdates(order_updates)) => {
+                        self.handle_order_updates(order_updates).await;
                     }
                     _ => {
                         error!("Invalid message format received");
@@ -56,32 +52,106 @@ impl MatcherWebSocket {
         }
     }
 
-    // Метод для получения батча ордеров, которые не находятся в процессе матчинга
+    async fn handle_batch_request(
+        &self,
+        write: &mut futures_util::stream::SplitSink<
+            WebSocketStream<TcpStream>,
+            Message,
+        >,
+    ) {
+        
+        let batch_size = self.settings.matchers.batch_size;
+        let available_orders = self.get_available_orders(batch_size).await;
+
+        let response = if available_orders.is_empty() {
+            MatcherResponse::NoOrders
+        } else {
+            MatcherResponse::Batch(available_orders)
+        };
+        
+        let response_text = serde_json::to_string(&response).unwrap();
+
+        if let Err(e) = write.send(Message::Text(response_text)).await {
+            error!("Failed to send response to matcher: {}", e);
+        }
+    }
+
+    async fn handle_order_updates(
+        &self,
+        order_updates: Vec<MatcherOrderUpdate>,
+    ) {
+        
+        for update in order_updates {
+            let order = SpotOrder {
+                id: update.order_id.clone(),
+                amount: update.new_amount,
+                price: update.price,
+                order_type: update.order_type,
+                timestamp: update.timestamp,
+                status: update.status,
+                user: String::new(), 
+                asset: String::new(),
+            };
+            self.update_order(order).await;
+        }
+    }
+
     async fn get_available_orders(&self, batch_size: usize) -> Vec<SpotOrder> {
         let mut matching_orders = self.matching_orders.lock().await;
         let mut available_orders = Vec::new();
 
-        // Получаем все ордера из OrderBook, которые не в MatchingOrders
-        let orders = self.order_book.get_orders_in_range(0, u128::MAX, OrderType::Buy)
-            .into_iter()
-            .chain(self.order_book.get_orders_in_range(0, u128::MAX, OrderType::Sell))
-            .filter(|order| !matching_orders.contains(&order.id))
-            .take(batch_size)
-            .collect::<Vec<_>>();
+        let buy_orders = self.order_book.get_buy_orders();  
+        let sell_orders = self.order_book.get_sell_orders();  
 
-        // Добавляем ордера в matching_orders
-        for order in &orders {
-            matching_orders.insert(order.id.clone());
+        let mut buy_iter = buy_orders.iter().rev();  
+        let mut sell_iter = sell_orders.iter();      
+
+        let mut buy_cursor = buy_iter.next();
+        let mut sell_cursor = sell_iter.next();
+
+        while let (Some((buy_price, buy_list)), Some((sell_price, sell_list))) = (buy_cursor, sell_cursor) {
+            if *buy_price >= *sell_price {
+                
+                for buy_order in buy_list {
+                    if matching_orders.contains(&buy_order.id) {
+                        continue; 
+                    }
+
+                    for sell_order in sell_list {
+                        if matching_orders.contains(&sell_order.id) {
+                            continue; 
+                        }
+
+                        
+                        available_orders.push(buy_order.clone());
+                        available_orders.push(sell_order.clone());
+
+                        matching_orders.insert(buy_order.id.clone());
+                        matching_orders.insert(sell_order.id.clone());
+
+                        if available_orders.len() >= batch_size {
+                            return available_orders;
+                        }
+                    }
+                }
+
+                
+                buy_cursor = buy_iter.next();
+                sell_cursor = sell_iter.next();
+            } else {
+                
+                buy_cursor = buy_iter.next();
+            }
         }
 
         available_orders
     }
 
-    // Метод для обработки обновления ордера
+
     pub async fn update_order(&self, order: SpotOrder) {
         self.order_book.update_order(order.clone());
         
-        // Удаляем из MatchingOrders, если он там есть
+        
         let mut matching_orders = self.matching_orders.lock().await;
         matching_orders.remove(&order.id);
     }

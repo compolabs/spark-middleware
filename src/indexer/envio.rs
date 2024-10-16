@@ -213,11 +213,10 @@ impl WebSocketClientEnvio {
                                     break orders;
                                 }
                             } else {
-                                // Handle non-data messages like "connection_ack" or "ka"
                                 continue;
                             }
                         }
-                        Ok(_) => continue, // Ignore non-text messages
+                        Ok(_) => continue, 
                         Err(e) => {
                             error!("Error during synchronization for {:?}: {:?}", order_type, e);
                             return Err(Error::EnvioWebsocketConnectionError);

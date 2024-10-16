@@ -156,7 +156,7 @@ impl ShardedOrderPool {
                 .update_order(order_id, price, new_amount, status, order_type)
                 .await;
 
-            // Если ордер полностью исполнен или отменен, удаляем его из пула
+            
             if let Some(new_status) = status {
                 /*
                 if new_status == OrderStatus::Filled || new_status == OrderStatus::Failed {
@@ -295,13 +295,13 @@ impl ShardedOrderPool {
     pub async fn select_batch(&self, batch_size: usize) -> Vec<SpotOrder> {
         let mut selected_orders = Vec::new();
 
-        // Проходим по всем шардам
+        
         for shard in &self.shards {
-            // Получаем лучшие ордера покупки и продажи
+            
             let buy_orders = shard.get_best_buy_orders();
             let sell_orders = shard.get_best_sell_orders();
 
-            // Фильтруем ордера, которые не в обработке
+            
             let available_buy_orders: Vec<_> = buy_orders
                 .into_iter()
                 .filter(|order| order.status.unwrap_or(OrderStatus::New) == OrderStatus::New)
@@ -312,16 +312,16 @@ impl ShardedOrderPool {
                 .filter(|order| order.status.unwrap_or(OrderStatus::New) == OrderStatus::New)
                 .collect();
 
-            // Здесь можно реализовать вашу логику по сопоставлению ордеров
-            // Например, добавить их в selected_orders, если цены подходят
+            
+            
 
-            // Для простоты добавим первые доступные ордера
+            
             for buy_order in available_buy_orders {
                 if selected_orders.len() >= batch_size {
                     break;
                 }
 
-                // Проверяем, есть ли подходящий ордер продажи
+                
                 if let Some(sell_order) = available_sell_orders
                     .iter()
                     .find(|sell_order| buy_order.price >= sell_order.price)
@@ -329,7 +329,7 @@ impl ShardedOrderPool {
                     selected_orders.push(buy_order.clone());
                     selected_orders.push(sell_order.clone());
 
-                    // Устанавливаем статус ордеров на InProgress
+                    
                     /*
                     self.update_order_status_internal(
                         &buy_order.id,

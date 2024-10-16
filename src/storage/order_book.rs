@@ -46,6 +46,13 @@ impl OrderBook {
         result
     }
 
+    pub fn get_buy_orders(&self) -> std::sync::RwLockReadGuard<BTreeMap<u128, Vec<SpotOrder>>> {
+        self.buy_orders.read().unwrap()
+    }
+
+    pub fn get_sell_orders(&self) -> std::sync::RwLockReadGuard<BTreeMap<u128, Vec<SpotOrder>>> {
+        self.sell_orders.read().unwrap()
+    }
 
     pub fn get_order(&self, id: &str, order_type: OrderType) -> Option<SpotOrder> {
         let target_tree = match order_type {

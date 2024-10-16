@@ -20,7 +20,8 @@ pub enum MatcherRequest {
 #[derive(Debug, Serialize, Deserialize)]
 pub enum MatcherResponse {
     Batch(Vec<SpotOrder>),
-    Ack, // Подтверждение получения обновлений
+    Ack,
+    NoOrders
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
