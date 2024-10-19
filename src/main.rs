@@ -4,12 +4,12 @@ use futures_util::future::FutureExt;
 use futures_util::future::{join_all, select};
 use indexer::pangea::initialize_pangea_indexer;
 use matchers::websocket::MatcherWebSocket;
+use std::sync::Arc;
 use storage::order_book::OrderBook;
 use tokio::net::TcpListener;
+use tokio::signal;
 use tokio_tungstenite::accept_async;
 use web::server::rocket;
-use std::sync::Arc;
-use tokio::signal;
 
 pub mod config;
 pub mod error;
@@ -24,7 +24,7 @@ async fn main() -> Result<(), Error> {
     env_logger::init();
 
     let settings = Arc::new(Settings::new());
-    let order_book= Arc::new(OrderBook::new());
+    let order_book = Arc::new(OrderBook::new());
     let mut tasks = vec![];
 
     if settings
@@ -41,9 +41,7 @@ async fn main() -> Result<(), Error> {
     tasks.push(rocket_task);
 
     let matcher_websocket = Arc::new(MatcherWebSocket::new(settings.clone(), order_book.clone()));
-    let matcher_ws_task = tokio::spawn(run_matcher_websocket_server(
-        matcher_websocket.clone(),
-    ));
+    let matcher_ws_task = tokio::spawn(run_matcher_websocket_server(matcher_websocket.clone()));
     tasks.push(matcher_ws_task);
 
     let ctrl_c_task = tokio::spawn(async {
@@ -62,22 +60,23 @@ async fn main() -> Result<(), Error> {
     Ok(())
 }
 
-async fn run_rocket_server(
-    settings: Arc<Settings>,
-    order_book: Arc<OrderBook>,
-) {
+async fn run_rocket_server(settings: Arc<Settings>, order_book: Arc<OrderBook>) {
     let rocket = rocket(settings, order_book);
     let _ = rocket.launch().await;
 }
 
 async fn run_matcher_websocket_server(matcher_websocket: Arc<MatcherWebSocket>) {
-    let listener = TcpListener::bind("0.0.0.0:9001").await.expect("Can't bind WebSocket port");
+    let listener = TcpListener::bind("0.0.0.0:9001")
+        .await
+        .expect("Can't bind WebSocket port");
 
     while let Ok((stream, _)) = listener.accept().await {
         let matcher_websocket_clone = matcher_websocket.clone();
 
         tokio::spawn(async move {
-            let ws_stream = accept_async(stream).await.expect("Error during WebSocket handshake");
+            let ws_stream = accept_async(stream)
+                .await
+                .expect("Error during WebSocket handshake");
             matcher_websocket_clone.handle_connection(ws_stream).await;
         });
     }

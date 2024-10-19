@@ -22,7 +22,6 @@ impl OrderBook {
         Self::default()
     }
 
-
     pub fn add_order(&self, order: SpotOrder) {
         let mut target_tree = match order.order_type {
             OrderType::Buy => self.buy_orders.write().unwrap(),
@@ -33,7 +32,6 @@ impl OrderBook {
             .or_insert(Vec::new())
             .push(order);
     }
-
 
     pub fn get_orders_in_range(
         &self,
@@ -74,12 +72,10 @@ impl OrderBook {
         None
     }
 
-
     pub fn update_order(&self, order: SpotOrder) {
         self.remove_order(&order.id, Some(order.order_type));
         self.add_order(order);
     }
-
 
     pub fn remove_order(&self, id: &str, order_type: Option<OrderType>) {
         match order_type {

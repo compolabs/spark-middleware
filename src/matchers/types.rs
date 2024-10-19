@@ -15,14 +15,14 @@ pub struct MatcherBatchRequest {
 pub enum MatcherRequest {
     BatchRequest(MatcherBatchRequest),
     OrderUpdates(Vec<MatcherOrderUpdate>),
-    Connect(MatcherConnectRequest)
+    Connect(MatcherConnectRequest),
 }
 
 #[derive(Debug, Serialize, Deserialize)]
 pub enum MatcherResponse {
     Batch(Vec<SpotOrder>),
     Ack,
-    NoOrders
+    NoOrders,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

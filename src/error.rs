@@ -1,6 +1,5 @@
 use thiserror::Error;
 
-
 #[derive(Error, Debug)]
 pub enum Error {
     #[error("Failed to retrieve environment variable '{0}': {1}")]

@@ -1,14 +1,14 @@
 use ethers_core::types::H256;
 use log::warn;
-use serde::{Deserialize, Serialize};
-use std::collections::HashSet;
-use std::str::FromStr;
-use std::sync::Arc;
+use log::{error, info};
 use pangea_client::{
     futures::StreamExt, provider::FuelProvider, query::Bound, requests::fuel::GetSparkOrderRequest,
     ClientBuilder, Format, WsProvider,
 };
-use log::{info, error};
+use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
+use std::str::FromStr;
+use std::sync::Arc;
 
 use crate::config::settings::Settings;
 use crate::error::Error;
@@ -29,8 +29,8 @@ pub struct PangeaOrderEvent {
     log_index: u64,
     market_id: String,
     order_id: String,
-    event_type: Option<String>, 
-    asset: Option<String>, 
+    event_type: Option<String>,
+    asset: Option<String>,
     amount: Option<u128>,
     asset_type: Option<String>,
     order_type: Option<String>,
@@ -38,9 +38,8 @@ pub struct PangeaOrderEvent {
     user: Option<String>,
     order_matcher: Option<String>,
     owner: Option<String>,
-    limit_type: Option<String>
+    limit_type: Option<String>,
 }
-
 
 pub async fn initialize_pangea_indexer(
     settings: Arc<Settings>,
@@ -48,7 +47,7 @@ pub async fn initialize_pangea_indexer(
     order_book: Arc<OrderBook>,
 ) -> Result<(), Error> {
     let ws_task_pangea = tokio::spawn(async move {
-        if let Err(e) = start_pangea_indexer((*settings).clone(),order_book).await {
+        if let Err(e) = start_pangea_indexer((*settings).clone(), order_book).await {
             eprintln!("Pangea error: {}", e);
         }
     });
@@ -56,7 +55,6 @@ pub async fn initialize_pangea_indexer(
     tasks.push(ws_task_pangea);
     Ok(())
 }
-
 
 pub async fn start_pangea_indexer(
     config: Settings,
@@ -101,10 +99,10 @@ pub async fn start_pangea_indexer(
                 let order: PangeaOrderEvent = serde_json::from_str(&data).unwrap();
                 last_processed_block = order.block_number;
                 handle_order_event(order_book.clone(), order).await;
-            },
+            }
             Err(e) => {
                 error!("Error in the stream of historical orders: {e}");
-                break; 
+                break;
             }
         }
     }
@@ -120,7 +118,7 @@ pub async fn start_pangea_indexer(
         };
 
         let stream_deltas = client
-            .get_fuel_spark_orders_by_format(request_deltas, Format::JsonStream, true) 
+            .get_fuel_spark_orders_by_format(request_deltas, Format::JsonStream, true)
             .await
             .expect("Failed to get fuel spark deltas");
 
@@ -133,16 +131,16 @@ pub async fn start_pangea_indexer(
                     let order: PangeaOrderEvent = serde_json::from_str(&data).unwrap();
                     last_processed_block = order.block_number;
                     handle_order_event(order_book.clone(), order).await;
-                },
+                }
                 Err(e) => {
                     error!("Error in the stream of new orders (deltas): {e}");
-                    break; 
+                    break;
                 }
             }
         }
 
         info!("Reconnecting to listen for new deltas...");
-        tokio::time::sleep(tokio::time::Duration::from_secs(1)).await; 
+        tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
     }
 }
 
@@ -178,7 +176,6 @@ pub async fn handle_order_event(order_book: Arc<OrderBook>, event: PangeaOrderEv
     }
 }
 
-
 fn create_new_order_from_event(event: &PangeaOrderEvent) -> Option<SpotOrder> {
     if let (Some(price), Some(amount), Some(order_type), Some(user)) = (
         event.price,
@@ -207,9 +204,13 @@ fn create_new_order_from_event(event: &PangeaOrderEvent) -> Option<SpotOrder> {
     }
 }
 
-
-
-pub fn process_trade(order_book: &OrderBook, order_id: &str, trade_amount: u128, order_type: Option<OrderType>, limit_type: Option<LimitType>) {
+pub fn process_trade(
+    order_book: &OrderBook,
+    order_id: &str,
+    trade_amount: u128,
+    order_type: Option<OrderType>,
+    limit_type: Option<LimitType>,
+) {
     match order_type {
         Some(order_type) => match limit_type {
             Some(limit_type) => {
@@ -241,30 +242,40 @@ pub fn process_trade(order_book: &OrderBook, order_id: &str, trade_amount: u128,
                 }
             }
             None => {
-                error!("Limit type is None for order_id: {}. Cannot process trade event.", order_id);
+                error!(
+                    "Limit type is None for order_id: {}. Cannot process trade event.",
+                    order_id
+                );
             }
-        }
+        },
         None => {
-            error!("Order type is None for order_id: {}. Cannot process trade event.", order_id);
+            error!(
+                "Order type is None for order_id: {}. Cannot process trade event.",
+                order_id
+            );
         }
     }
 }
 
 impl PangeaOrderEvent {
     fn order_type_to_enum(&self) -> Option<OrderType> {
-        self.order_type.as_deref().and_then(|order_type| match order_type {
-            "Buy" => Some(OrderType::Buy),
-            "Sell" => Some(OrderType::Sell),
-            _ => None,
-        })
+        self.order_type
+            .as_deref()
+            .and_then(|order_type| match order_type {
+                "Buy" => Some(OrderType::Buy),
+                "Sell" => Some(OrderType::Sell),
+                _ => None,
+            })
     }
 
     fn limit_type_to_enum(&self) -> Option<LimitType> {
-        self.limit_type.as_deref().and_then(|limit_type| match limit_type {
-            "FOK" => Some(LimitType::FOK),
-            "IOC" => Some(LimitType::IOC),
-            "GTC" => Some(LimitType::GTC),
-            _ => None,
-        })
+        self.limit_type
+            .as_deref()
+            .and_then(|limit_type| match limit_type {
+                "FOK" => Some(LimitType::FOK),
+                "IOC" => Some(LimitType::IOC),
+                "GTC" => Some(LimitType::GTC),
+                _ => None,
+            })
     }
 }

@@ -18,7 +18,6 @@ use crate::storage::order_book::OrderBook;
 
 use super::graphql::Query;
 
-
 #[derive(Serialize, JsonSchema)]
 pub struct OrdersResponse {
     pub orders: Vec<SpotOrder>,
@@ -65,14 +64,11 @@ pub struct SpreadResponse {
     pub spread: Option<i128>,
 }
 
-
 #[openapi]
 #[get("/orders/buy")]
 pub fn get_buy_orders(order_book: &State<Arc<OrderBook>>) -> Json<OrdersResponse> {
     let buy_orders = order_book.get_orders_in_range(0, u128::MAX, OrderType::Buy);
-    Json(OrdersResponse {
-        orders: buy_orders,
-    })
+    Json(OrdersResponse { orders: buy_orders })
 }
 
 #[openapi]
@@ -83,7 +79,6 @@ pub fn get_sell_orders(order_book: &State<Arc<OrderBook>>) -> Json<OrdersRespons
         orders: sell_orders,
     })
 }
-
 
 #[openapi]
 #[get("/spread")]
@@ -107,7 +102,6 @@ pub fn get_indexer_spread(order_book: &State<Arc<OrderBook>>) -> Json<SpreadResp
     })
 }
 
-
 #[openapi]
 #[get("/orders/count")]
 pub fn get_orders_count(order_book: &State<Arc<OrderBook>>) -> Json<HashMap<String, usize>> {
@@ -121,13 +115,12 @@ pub fn get_orders_count(order_book: &State<Arc<OrderBook>>) -> Json<HashMap<Stri
     Json(counts)
 }
 
-
 #[rocket::post("/graphql", data = "<request>")]
 pub async fn graphql_handler(
     schema: &State<Schema<Query, EmptyMutation, EmptySubscription>>,
     request: GraphQLRequest,
 ) -> GraphQLResponse {
-    request.execute(&**schema).await  // Разыменовываем State
+    request.execute(&**schema).await // Разыменовываем State
 }
 
 #[rocket::get("/graphql/playground")]

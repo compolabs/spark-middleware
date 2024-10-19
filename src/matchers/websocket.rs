@@ -1,22 +1,22 @@
 use crate::config::settings::Settings;
+use crate::indexer::spot_order::SpotOrder;
 use crate::matchers::types::{MatcherRequest, MatcherResponse};
 use crate::storage::order_book::OrderBook;
-use crate::indexer::spot_order::SpotOrder;
-use futures_util::{StreamExt, SinkExt};
+use futures_util::{SinkExt, StreamExt};
 use log::error;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
+use tokio::net::TcpStream;
 use tokio::sync::Mutex;
 use tokio_tungstenite::tungstenite::protocol::Message;
 use tokio_tungstenite::WebSocketStream;
-use tokio::net::TcpStream;
 
 use super::types::{MatcherConnectRequest, MatcherOrderUpdate};
 
 pub struct MatcherWebSocket {
     pub settings: Arc<Settings>,
     pub order_book: Arc<OrderBook>,
-    pub matching_orders: Arc<Mutex<HashMap<String, HashSet<String>>>>,  
+    pub matching_orders: Arc<Mutex<HashMap<String, HashSet<String>>>>,
 }
 
 impl MatcherWebSocket {
@@ -28,13 +28,10 @@ impl MatcherWebSocket {
         }
     }
 
-    pub async fn handle_connection(
-        self: Arc<Self>,
-        ws_stream: WebSocketStream<TcpStream>,
-    ) {
+    pub async fn handle_connection(self: Arc<Self>, ws_stream: WebSocketStream<TcpStream>) {
         let (mut write, mut read) = ws_stream.split();
 
-        let mut matcher_uuid : Option<String> = None;
+        let mut matcher_uuid: Option<String> = None;
 
         while let Some(Ok(message)) = read.next().await {
             if let Message::Text(text) = message {
@@ -53,7 +50,9 @@ impl MatcherWebSocket {
                         matcher_uuid = Some(uuid.clone());
                         // Инициализируем matching_orders для нового матчера
                         let mut matching_orders = self.matching_orders.lock().await;
-                        matching_orders.entry(uuid.clone()).or_insert_with(HashSet::new);
+                        matching_orders
+                            .entry(uuid.clone())
+                            .or_insert_with(HashSet::new);
                     }
                     _ => {
                         error!("{:?}", text);
@@ -66,10 +65,7 @@ impl MatcherWebSocket {
 
     async fn handle_batch_request(
         &self,
-        write: &mut futures_util::stream::SplitSink<
-            WebSocketStream<TcpStream>,
-            Message,
-        >,
+        write: &mut futures_util::stream::SplitSink<WebSocketStream<TcpStream>, Message>,
         uuid: String,
     ) {
         let batch_size = self.settings.matchers.batch_size;
@@ -88,13 +84,7 @@ impl MatcherWebSocket {
         }
     }
 
-
-    async fn handle_order_updates(
-        &self,
-        _order_updates: Vec<MatcherOrderUpdate>,
-        _uuid: String
-    ) {
-    }
+    async fn handle_order_updates(&self, _order_updates: Vec<MatcherOrderUpdate>, _uuid: String) {}
 
     async fn get_available_orders(&self, batch_size: usize, uuid: &str) -> Vec<SpotOrder> {
         let mut available_orders = Vec::new();
@@ -190,11 +180,9 @@ impl MatcherWebSocket {
         available_orders
     }
 
-
     pub async fn update_order(&self, order: SpotOrder) {
         self.order_book.update_order(order.clone());
-        
-        
+
         let mut matching_orders = self.matching_orders.lock().await;
         matching_orders.remove(&order.id);
     }
