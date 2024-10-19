@@ -8,12 +8,18 @@ pub struct OrderBook {
     sell_orders: Arc<RwLock<BTreeMap<u128, Vec<SpotOrder>>>>,
 }
 
-impl OrderBook {
-    pub fn new() -> Self {
+impl Default for OrderBook {
+    fn default() -> Self {
         OrderBook {
             buy_orders: Arc::new(RwLock::new(BTreeMap::new())),
             sell_orders: Arc::new(RwLock::new(BTreeMap::new())),
         }
+    }
+}
+
+impl OrderBook {
+    pub fn new() -> Self {
+        Self::default()
     }
 
 
@@ -101,7 +107,6 @@ impl OrderBook {
         let mut empty_keys = Vec::new();
 
         for (&price, order_list) in target_tree.iter_mut() {
-            let original_len = order_list.len();
             order_list.retain(|order| order.id != id);
             if order_list.is_empty() {
                 empty_keys.push(price);

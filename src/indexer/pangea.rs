@@ -1,5 +1,4 @@
 use ethers_core::types::H256;
-use log::debug;
 use log::warn;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;

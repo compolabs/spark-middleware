@@ -1,7 +1,7 @@
 use crate::config::settings::Settings;
 use crate::matchers::types::{MatcherRequest, MatcherResponse};
 use crate::storage::order_book::OrderBook;
-use crate::indexer::spot_order::{OrderType, SpotOrder};
+use crate::indexer::spot_order::SpotOrder;
 use futures_util::{StreamExt, SinkExt};
 use log::error;
 use std::collections::{HashMap, HashSet};
@@ -91,16 +91,9 @@ impl MatcherWebSocket {
 
     async fn handle_order_updates(
         &self,
-        order_updates: Vec<MatcherOrderUpdate>,
-        uuid: String
+        _order_updates: Vec<MatcherOrderUpdate>,
+        _uuid: String
     ) {
-        /*
-        let mut matching_orders = self.matching_orders.lock().await;
-
-        for update in order_updates {
-            matching_orders.remove(&update.order_id);
-        }
-        */
     }
 
     async fn get_available_orders(&self, batch_size: usize, uuid: &str) -> Vec<SpotOrder> {

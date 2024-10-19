@@ -1,6 +1,6 @@
-use async_graphql::{Context, Object, Schema, SimpleObject};
+use async_graphql::{Context, Object, SimpleObject};
 use std::sync::Arc;
-use crate::indexer::spot_order::{OrderType, SpotOrder};
+use crate::indexer::spot_order::OrderType;
 use crate::storage::order_book::OrderBook;
 
 
