@@ -106,6 +106,9 @@ pub async fn start_pangea_indexer(
             }
         }
     }
+    if last_processed_block == 0 {
+        last_processed_block = contract_start_block;
+    }
 
     info!("Switching to listening for new orders (deltas)");
 
@@ -145,11 +148,6 @@ pub async fn start_pangea_indexer(
 }
 
 pub async fn handle_order_event(order_book: Arc<OrderBook>, event: PangeaOrderEvent) {
-    if event.order_id == "0x13c0257a269b6e49a6737f7eb9282cb4768f27b0a7076720052839ad2f500092" {
-        warn!("==========================");
-        warn!("event {:?}", event);
-        warn!("==========================");
-    }
     if let Some(event_type) = event.event_type.as_deref() {
         match event_type {
             "Open" => {
