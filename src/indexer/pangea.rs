@@ -148,12 +148,17 @@ pub async fn start_pangea_indexer(
 }
 
 pub async fn handle_order_event(order_book: Arc<OrderBook>, event: PangeaOrderEvent) {
+    if event.order_id == "0x13c0257a269b6e49a6737f7eb9282cb4768f27b0a7076720052839ad2f500092" {
+        warn!("==========================");
+        warn!("event {:?}", event);
+        warn!("==========================");
+    }
     if let Some(event_type) = event.event_type.as_deref() {
         match event_type {
             "Open" => {
                 if let Some(order) = create_new_order_from_event(&event) {
                     order_book.add_order(order);
-                    debug!("Added new order with id: {}", event.order_id);
+                    //info!("Added new order with id: {}", event.order_id);
                 }
             }
             "Trade" => {
@@ -165,7 +170,7 @@ pub async fn handle_order_event(order_book: Arc<OrderBook>, event: PangeaOrderEv
             }
             "Cancel" => {
                 order_book.remove_order(&event.order_id, event.order_type_to_enum());
-                debug!("Removed order with id: {} due to Cancel event", event.order_id);
+                //info!("Removed order with id: {} due to Cancel event", event.order_id);
             }
             _ => {
                 error!("Unknown event type: {}", event_type);
@@ -216,14 +221,15 @@ pub fn process_trade(order_book: &OrderBook, order_id: &str, trade_amount: u128,
                                 order.amount -= trade_amount;
                                 order.status = Some(OrderStatus::PartiallyMatched);
                                 order_book.update_order(order.clone());
-                                debug!(
+                                /*
+                                info!(
                                     "Updated order with id: {} - partially matched, remaining amount: {}",
                                     order_id, order.amount
-                                );
+                                );*/
                             } else {
                                 order.status = Some(OrderStatus::Matched);
                                 order_book.remove_order(order_id, Some(order_type));
-                                debug!("Removed order with id: {} - fully matched", order_id);
+                                //info!("Removed order with id: {} - fully matched", order_id);
                             }
                         } else {
                             error!("Order with id: {} not found for trade event", order_id);
@@ -231,7 +237,7 @@ pub fn process_trade(order_book: &OrderBook, order_id: &str, trade_amount: u128,
                     }
                     _ => {
                         order_book.remove_order(order_id, Some(order_type));
-                        debug!("Removed order with id: {} - FOK matched", order_id);
+                        //info!("Removed order with id: {} - FOK matched", order_id);
                     }
                 }
             }
