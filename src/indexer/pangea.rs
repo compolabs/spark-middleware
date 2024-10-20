@@ -1,5 +1,4 @@
 use ethers_core::types::H256;
-use log::warn;
 use log::{error, info};
 use pangea_client::{
     futures::StreamExt, provider::FuelProvider, query::Bound, requests::fuel::GetSparkOrderRequest,
@@ -112,39 +111,39 @@ pub async fn start_pangea_indexer(
 
     info!("Switching to listening for new orders (deltas)");
 
-    loop {
-        let request_deltas = GetSparkOrderRequest {
-            from_block: Bound::Exact(last_processed_block + 1),
-            to_block: Bound::Latest,
-            market_id__in: HashSet::from([contract_h256]),
-            ..Default::default()
-        };
+    let request_deltas = GetSparkOrderRequest {
+        from_block: Bound::Exact(last_processed_block + 1),
+        to_block: Bound::Subscribe,
+        market_id__in: HashSet::from([contract_h256]),
+        ..Default::default()
+    };
 
-        let stream_deltas = client
-            .get_fuel_spark_orders_by_format(request_deltas, Format::JsonStream, true)
-            .await
-            .expect("Failed to get fuel spark deltas");
+    let stream_deltas = client
+        .get_fuel_spark_orders_by_format(request_deltas, Format::JsonStream, true)
+        .await
+        .expect("Failed to get fuel spark deltas");
 
-        pangea_client::futures::pin_mut!(stream_deltas);
+    pangea_client::futures::pin_mut!(stream_deltas);
 
-        while let Some(data) = stream_deltas.next().await {
-            match data {
-                Ok(data) => {
-                    let data = String::from_utf8(data).unwrap();
-                    let order: PangeaOrderEvent = serde_json::from_str(&data).unwrap();
-                    last_processed_block = order.block_number;
-                    handle_order_event(order_book.clone(), order).await;
-                }
-                Err(e) => {
-                    error!("Error in the stream of new orders (deltas): {e}");
-                    break;
-                }
+    while let Some(data) = stream_deltas.next().await {
+        match data {
+            Ok(data) => {
+                info!("new data");
+                let data = String::from_utf8(data).unwrap();
+                let order: PangeaOrderEvent = serde_json::from_str(&data).unwrap();
+                //       last_processed_block = order.block_number;
+                handle_order_event(order_book.clone(), order).await;
+            }
+            Err(e) => {
+                error!("Error in the stream of new orders (deltas): {e}");
+                break;
             }
         }
-
-        info!("Reconnecting to listen for new deltas...");
-        tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
     }
+    Ok(())
+
+    //info!("Reconnecting to listen for new deltas...");
+    //tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
 }
 
 pub async fn handle_order_event(order_book: Arc<OrderBook>, event: PangeaOrderEvent) {
