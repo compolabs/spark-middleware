@@ -75,13 +75,16 @@ pub async fn start_pangea_indexer(
     let mut last_processed_block: i64 = 0;
     let contract_start_block: i64 = config.contract.contract_block;
     let contract_h256 = H256::from_str(&config.contract.contract_id).unwrap(); //NTD Remove unwrap
-
+    
     let request_all = GetSparkOrderRequest {
         from_block: Bound::Exact(contract_start_block),
         to_block: Bound::Latest,
         market_id__in: HashSet::from([contract_h256]),
         ..Default::default()
     };
+    info!("====================");
+    info!("DEBUG/n {:?}",request_all.clone());
+    info!("====================");
 
     let stream_all = client
         .get_fuel_spark_orders_by_format(request_all, Format::JsonStream, false)
@@ -140,9 +143,8 @@ pub async fn start_pangea_indexer(
             }
         }
     }
-    Ok(())
 
-    //info!("Reconnecting to listen for new deltas...");
+    Ok(())
     //tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
 }
 
@@ -152,7 +154,7 @@ pub async fn handle_order_event(order_book: Arc<OrderBook>, event: PangeaOrderEv
             "Open" => {
                 if let Some(order) = create_new_order_from_event(&event) {
                     order_book.add_order(order);
-                    //info!("Added new order with id: {}", event.order_id);
+                    info!("Added new order with id: {}", event.order_id);
                 }
             }
             "Trade" => {
@@ -164,7 +166,7 @@ pub async fn handle_order_event(order_book: Arc<OrderBook>, event: PangeaOrderEv
             }
             "Cancel" => {
                 order_book.remove_order(&event.order_id, event.order_type_to_enum());
-                //info!("Removed order with id: {} due to Cancel event", event.order_id);
+                info!("Removed order with id: {} due to Cancel event", event.order_id);
             }
             _ => {
                 error!("Unknown event type: {}", event_type);
@@ -226,7 +228,7 @@ pub fn process_trade(
                             } else {
                                 order.status = Some(OrderStatus::Matched);
                                 order_book.remove_order(order_id, Some(order_type));
-                                //info!("Removed order with id: {} - fully matched", order_id);
+                                info!("Removed order with id: {} - fully matched", order_id);
                             }
                         } else {
                             error!("Order with id: {} not found for trade event", order_id);
@@ -234,7 +236,7 @@ pub fn process_trade(
                     }
                     _ => {
                         order_book.remove_order(order_id, Some(order_type));
-                        //info!("Removed order with id: {} - FOK matched", order_id);
+                        info!("Removed order with id: {} - FOK matched", order_id);
                     }
                 }
             }
