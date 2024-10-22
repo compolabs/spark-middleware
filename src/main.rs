@@ -41,7 +41,10 @@ async fn main() -> Result<(), Error> {
     tasks.push(rocket_task);
 
     let matcher_websocket = Arc::new(MatcherWebSocket::new(settings.clone(), order_book.clone()));
-    let matcher_ws_task = tokio::spawn(run_matcher_websocket_server(matcher_websocket.clone()));
+    let matcher_ws_task = tokio::spawn(run_matcher_websocket_server(
+        matcher_websocket.clone(),
+        settings.matchers.matcher_ws_port,
+    ));
     tasks.push(matcher_ws_task);
 
     let ctrl_c_task = tokio::spawn(async {
@@ -65,8 +68,12 @@ async fn run_rocket_server(settings: Arc<Settings>, order_book: Arc<OrderBook>) 
     let _ = rocket.launch().await;
 }
 
-async fn run_matcher_websocket_server(matcher_websocket: Arc<MatcherWebSocket>) {
-    let listener = TcpListener::bind("0.0.0.0:9001")
+async fn run_matcher_websocket_server(
+    matcher_websocket: Arc<MatcherWebSocket>,
+    matcher_ws_port: u16,
+) {
+    let matcher_ws_str = format!("0.0.0.0:{}", matcher_ws_port);
+    let listener = TcpListener::bind(matcher_ws_str)
         .await
         .expect("Can't bind WebSocket port");
 

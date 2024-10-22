@@ -34,7 +34,7 @@ pub struct ContractSettings {
 #[derive(Debug, Clone, Deserialize)]
 pub struct MatchersSettings {
     pub matchers: Vec<String>,
-    pub matcher_ws_url: String,
+    pub matcher_ws_port: u16,
     pub batch_size: usize,
 }
 

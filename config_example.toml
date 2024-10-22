@@ -14,7 +14,7 @@ order_limit = 10
 
 [matchers]
 matchers = ["20faf0f7-94a9-4651-a073-9f4d376201fa","fbf16c35-a12e-4eda-87f3-be18dc91d6cd","38647325-de9c-47ff-85cf-39231abed68c"]
-matcher_ws_url = "localhost:9001" 
+matcher_ws_port = 9001
 batch_size = 25
 
 [server]
