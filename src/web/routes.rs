@@ -1,19 +1,22 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use async_graphql::http::{playground_source, GraphQLPlaygroundConfig};
+use async_graphql::{EmptyMutation, EmptySubscription, Schema};
+use async_graphql_rocket::{GraphQLRequest, GraphQLResponse};
+use log::warn;
 use rocket::request::FromParam;
+use rocket::response::content;
 use rocket::serde::json::Json;
-use rocket::{get, Route, State};
+use rocket::{get, routes, Route, State};
 use rocket_okapi::swagger_ui::SwaggerUIConfig;
 use rocket_okapi::{openapi, openapi_get_routes, JsonSchema};
 use serde::{Deserialize, Serialize};
 
-use async_graphql_rocket::{GraphQLQuery, GraphQLRequest, GraphQLResponse};
-
 use crate::indexer::spot_order::{OrderType, SpotOrder};
-use crate::middleware::aggregator::Aggregator;
-use crate::middleware::manager::OrderManager;
-use crate::web::graphql::AppSchema;
+use crate::storage::order_book::OrderBook;
+
+use super::graphql::Query;
 
 #[derive(Serialize, JsonSchema)]
 pub struct OrdersResponse {
@@ -24,7 +27,7 @@ pub struct OrdersResponse {
 pub enum Indexer {
     Envio,
     Subsquid,
-    Superchain,
+    Pangea,
 }
 
 impl Indexer {
@@ -32,12 +35,12 @@ impl Indexer {
         match self {
             Indexer::Envio => "envio",
             Indexer::Subsquid => "subsquid",
-            Indexer::Superchain => "superchain",
+            Indexer::Pangea => "superchain",
         }
     }
 
     pub fn all() -> Vec<Indexer> {
-        vec![Indexer::Envio, Indexer::Subsquid, Indexer::Superchain]
+        vec![Indexer::Envio, Indexer::Subsquid, Indexer::Pangea]
     }
 }
 
@@ -48,7 +51,7 @@ impl<'r> FromParam<'r> for Indexer {
         match param {
             "Envio" => Ok(Indexer::Envio),
             "Subsquid" => Ok(Indexer::Subsquid),
-            "Superchain" => Ok(Indexer::Superchain),
+            "Pangea" => Ok(Indexer::Pangea),
             _ => Err(param),
         }
     }
@@ -62,130 +65,83 @@ pub struct SpreadResponse {
 }
 
 #[openapi]
-#[get("/orders/<indexer>/buy")]
-async fn get_buy_orders(
-    indexer: Indexer,
-    managers: &State<HashMap<String, Arc<OrderManager>>>,
-) -> Option<Json<OrdersResponse>> {
-    if let Some(manager) = managers.get(indexer.as_str()) {
-        let buy_orders = manager.get_all_buy_orders().await;
-        return Some(Json(OrdersResponse { orders: buy_orders }));
-    }
-    None
-}
-
-#[openapi]
-#[get("/orders/<indexer>/sell")]
-async fn get_sell_orders(
-    indexer: Indexer,
-    managers: &State<HashMap<String, Arc<OrderManager>>>,
-) -> Option<Json<OrdersResponse>> {
-    if let Some(manager) = managers.get(indexer.as_str()) {
-        let sell_orders = manager.get_all_sell_orders().await;
-        return Some(Json(OrdersResponse {
-            orders: sell_orders,
-        }));
-    }
-    None
-}
-
-#[openapi]
-#[get("/aggregated/orders/buy")]
-async fn get_aggregated_buy_orders(aggregator: &State<Arc<Aggregator>>) -> Json<OrdersResponse> {
-    let buy_orders = aggregator.get_aggregated_orders(OrderType::Buy).await;
+#[get("/orders/buy")]
+pub fn get_buy_orders(order_book: &State<Arc<OrderBook>>) -> Json<OrdersResponse> {
+    let buy_orders = order_book.get_orders_in_range(0, u128::MAX, OrderType::Buy);
     Json(OrdersResponse { orders: buy_orders })
 }
 
 #[openapi]
-#[get("/aggregated/orders/sell")]
-async fn get_aggregated_sell_orders(aggregator: &State<Arc<Aggregator>>) -> Json<OrdersResponse> {
-    let sell_orders = aggregator.get_aggregated_orders(OrderType::Sell).await;
+#[get("/orders/sell")]
+pub fn get_sell_orders(order_book: &State<Arc<OrderBook>>) -> Json<OrdersResponse> {
+    let sell_orders = order_book.get_orders_in_range(0, u128::MAX, OrderType::Sell);
     Json(OrdersResponse {
         orders: sell_orders,
     })
 }
 
 #[openapi]
-#[get("/spread/<indexer>")]
-async fn get_indexer_spread(
-    indexer: Indexer,
-    managers: &State<HashMap<String, Arc<OrderManager>>>,
-) -> Option<Json<SpreadResponse>> {
-    if let Some(manager) = managers.get(indexer.as_str()) {
-        let buy_orders = manager.get_all_buy_orders().await;
-        let sell_orders = manager.get_all_sell_orders().await;
+#[get("/spread")]
+pub fn get_indexer_spread(order_book: &State<Arc<OrderBook>>) -> Json<SpreadResponse> {
+    let buy_orders = order_book.get_orders_in_range(0, u128::MAX, OrderType::Buy);
+    let sell_orders = order_book.get_orders_in_range(0, u128::MAX, OrderType::Sell);
 
-        let best_buy = buy_orders.iter().max_by_key(|order| order.price).map(|order| order.price);
-        let best_sell = sell_orders.iter().min_by_key(|order| order.price).map(|order| order.price);
+    let max_buy_price = buy_orders.iter().map(|o| o.price).max();
+    let min_sell_price = sell_orders.iter().map(|o| o.price).min();
 
-        let spread = if let (Some(buy), Some(sell)) = (best_buy, best_sell) {
-            Some(sell as i128 - buy as i128)
-        } else {
-            None
-        };
-
-        return Some(Json(SpreadResponse {
-            buy: best_buy,
-            sell: best_sell,
-            spread,
-        }));
-    }
-    None
-}
-
-#[openapi]
-#[get("/aggregated/spread")]
-async fn get_aggregated_spread(aggregator: &State<Arc<Aggregator>>) -> Json<SpreadResponse> {
-    let buy_orders = aggregator
-        .get_aggregated_orders(crate::indexer::spot_order::OrderType::Buy)
-        .await;
-    let sell_orders = aggregator
-        .get_aggregated_orders(crate::indexer::spot_order::OrderType::Sell)
-        .await;
-
-    let best_buy = buy_orders.iter().max_by_key(|order| order.price).map(|order| order.price);
-    let best_sell = sell_orders.iter().min_by_key(|order| order.price).map(|order| order.price);
-
-    let spread = if let (Some(buy), Some(sell)) = (best_buy, best_sell) {
-        Some(sell as i128 - buy as i128)
+    let spread = if let (Some(max_buy), Some(min_sell)) = (max_buy_price, min_sell_price) {
+        Some(min_sell as i128 - max_buy as i128)
     } else {
         None
     };
 
     Json(SpreadResponse {
-        buy: best_buy,
-        sell: best_sell,
+        buy: max_buy_price,
+        sell: min_sell_price,
         spread,
     })
 }
 
-#[rocket::get("/graphql?<query..>")]
-pub async fn graphql_query(schema: &State<AppSchema>, query: GraphQLQuery) -> GraphQLResponse {
-    query.execute(schema.inner()).await
+#[openapi]
+#[get("/orders/count")]
+pub fn get_orders_count(order_book: &State<Arc<OrderBook>>) -> Json<HashMap<String, usize>> {
+    let buy_orders = order_book.get_orders_in_range(0, u128::MAX, OrderType::Buy);
+    let sell_orders = order_book.get_orders_in_range(0, u128::MAX, OrderType::Sell);
+
+    let mut counts = HashMap::new();
+    counts.insert("buy_orders".to_string(), buy_orders.len());
+    counts.insert("sell_orders".to_string(), sell_orders.len());
+
+    Json(counts)
 }
 
-#[rocket::post("/graphql", data = "<request>", format = "application/json")]
-pub async fn graphql_request(schema: &State<AppSchema>, request: GraphQLRequest) -> GraphQLResponse {
-    request.execute(schema.inner()).await
+#[rocket::post("/graphql", data = "<request>")]
+pub async fn graphql_handler(
+    schema: &State<Schema<Query, EmptyMutation, EmptySubscription>>,
+    request: GraphQLRequest,
+) -> GraphQLResponse {
+    request.execute(&**schema).await // Разыменовываем State
 }
 
-#[rocket::get("/graphiql")]
-pub fn graphiql() -> rocket::response::content::RawHtml<String> {
-    rocket::response::content::RawHtml(
-        async_graphql::http::GraphiQLSource::build().endpoint("/graphql").finish()
-    )
-}
+#[rocket::get("/graphql/playground")]
+pub fn graphql_playground() -> content::RawHtml<String> {
+    warn!("======GQPLGRND========");
+    let gqlpgc = GraphQLPlaygroundConfig::new("/api/graphql");
 
+    content::RawHtml(playground_source(gqlpgc))
+}
 
 pub fn get_routes() -> Vec<Route> {
     openapi_get_routes![
         get_buy_orders,
         get_sell_orders,
-        get_aggregated_buy_orders,
-        get_aggregated_sell_orders,
         get_indexer_spread,
-        get_aggregated_spread
+        get_orders_count,
     ]
+}
+
+pub fn get_graphql_routes() -> Vec<Route> {
+    routes![graphql_handler, graphql_playground]
 }
 
 pub fn get_docs() -> SwaggerUIConfig {

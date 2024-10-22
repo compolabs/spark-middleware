@@ -10,6 +10,22 @@ pub enum OrderType {
     Sell,
 }
 
+#[derive(Debug, PartialEq, Eq, Clone, Copy, JsonSchema, Serialize, Deserialize)]
+pub enum LimitType {
+    FOK,
+    IOC,
+    GTC,
+}
+
+#[derive(Debug, PartialEq, Eq, Clone, Copy, JsonSchema, Serialize, Deserialize)]
+pub enum OrderStatus {
+    New,
+    PartiallyMatched,
+    Matched,
+    Cancelled,
+    Failed,
+}
+
 #[derive(Debug, Clone, JsonSchema, Serialize, Deserialize, Eq)]
 pub struct SpotOrder {
     pub id: String,
@@ -19,6 +35,7 @@ pub struct SpotOrder {
     pub price: u128,
     pub timestamp: u64,
     pub order_type: OrderType,
+    pub status: Option<OrderStatus>,
 }
 
 impl PartialEq for SpotOrder {
@@ -29,7 +46,9 @@ impl PartialEq for SpotOrder {
 
 impl Ord for SpotOrder {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        self.price.cmp(&other.price)
+        self.price
+            .cmp(&other.price)
+            .then_with(|| self.timestamp.cmp(&other.timestamp)) // Сравниваем по времени, если цена одинаковая
     }
 }
 
@@ -83,6 +102,7 @@ impl SpotOrder {
             price,
             timestamp,
             order_type: intermediate.order_type,
+            status: Some(OrderStatus::New),
         })
     }
 
@@ -105,6 +125,7 @@ impl SpotOrder {
             price,
             timestamp,
             order_type,
+            status: Some(OrderStatus::New),
         })
     }
 }

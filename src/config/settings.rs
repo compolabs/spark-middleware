@@ -19,20 +19,23 @@ pub struct IndexerSettings {
 pub struct WebSocketSettings {
     pub envio_url: String,
     pub subsquid_url: String,
-    pub superchain_username: String,
-    pub superchain_pass: String,
+    pub pangea_username: String,
+    pub pangea_pass: String,
+    pub pangea_url: String,
 }
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct ContractSettings {
     pub contract_id: String,
+    pub contract_block: i64,
     pub order_limit: i32,
 }
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct MatchersSettings {
     pub matchers: Vec<String>,
-    pub matcher_ws_url: String,
+    pub matcher_ws_port: u16,
+    pub batch_size: usize,
 }
 
 #[derive(Debug, Clone, Deserialize)]
