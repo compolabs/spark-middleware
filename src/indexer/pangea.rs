@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::str::FromStr;
 use std::sync::Arc;
+use tokio::sync::watch;
 use tokio::time::{timeout, Duration};
 
 use crate::config::settings::Settings;
@@ -135,22 +136,30 @@ pub async fn load_historical_orders(
     Ok(last_processed_block)
 }
 
-pub async fn start_real_time_stream(
+async fn start_real_time_stream(
     client: &Client<WsProvider>,
     last_processed_block: i64,
     contract_h256: H256,
     order_book: Arc<OrderBook>,
 ) -> Result<(), Error> {
-    let request_deltas = GetSparkOrderRequest {
-        from_block: Bound::Exact(last_processed_block + 1),
-        to_block: Bound::Subscribe,
-        market_id__in: HashSet::from([contract_h256]),
-        ..Default::default()
-    };
-
+    let (shutdown_tx, shutdown_rx) = watch::channel(false);
     loop {
+        if *shutdown_rx.borrow() {
+            warn!("Shutting down old connection before restarting");
+            return Ok(());
+        }
+
         let stream_deltas = client
-            .get_fuel_spark_orders_by_format(request_deltas.clone(), Format::JsonStream, true)
+            .get_fuel_spark_orders_by_format(
+                GetSparkOrderRequest {
+                    from_block: Bound::Exact(last_processed_block + 1),
+                    to_block: Bound::Subscribe,
+                    market_id__in: HashSet::from([contract_h256]),
+                    ..Default::default()
+                },
+                Format::JsonStream,
+                true,
+            )
             .await
             .expect("Failed to get fuel spark deltas");
 
@@ -167,12 +176,13 @@ pub async fn start_real_time_stream(
                 }
                 Err(e) => {
                     error!("Error in real-time stream: {e}");
+                    shutdown_tx.send(true).unwrap();
                     break;
                 }
             }
         }
 
-        warn!("No data received in the last 20 seconds or stream ended. Reconnecting...");
+        warn!("Reconnecting after no data for 20 seconds or stream error...");
         tokio::time::sleep(Duration::from_secs(5)).await;
     }
 }
