@@ -3,7 +3,7 @@ use crate::indexer::spot_order::SpotOrder;
 use crate::matchers::types::{MatcherRequest, MatcherResponse};
 use crate::storage::order_book::OrderBook;
 use futures_util::{SinkExt, StreamExt};
-use log::error;
+use log::{info,error};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use tokio::net::TcpStream;
@@ -84,7 +84,24 @@ impl MatcherWebSocket {
         }
     }
 
-    async fn handle_order_updates(&self, _order_updates: Vec<MatcherOrderUpdate>, _uuid: String) {}
+    async fn handle_order_updates(&self, order_updates: Vec<MatcherOrderUpdate>, uuid: String) {
+        info!("=======================");
+        info!("order updates {:?}", order_updates);
+        info!("=======================");
+
+        let mut matching_orders = self.matching_orders.lock().await;
+        if let Some(order_ids) = matching_orders.get_mut(&uuid) {
+            for update in order_updates {
+                order_ids.remove(&update.order_id);
+                info!(
+                    "Order {} removed from matching_orders for matcher {}",
+                    update.order_id, uuid
+                );
+            }
+        } else {
+            info!("No matching orders found for matcher {}", uuid);
+        }
+    }
 
     async fn get_available_orders(&self, batch_size: usize, uuid: &str) -> Vec<SpotOrder> {
         let mut available_orders = Vec::new();
@@ -181,7 +198,7 @@ impl MatcherWebSocket {
     }
 
     pub async fn update_order(&self, order: SpotOrder) {
-        self.order_book.update_order(order.clone());
+        //self.order_book.update_order(order.clone());
 
         let mut matching_orders = self.matching_orders.lock().await;
         matching_orders.remove(&order.id);
