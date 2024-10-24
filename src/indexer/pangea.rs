@@ -1,5 +1,6 @@
 use ethers_core::types::H256;
-use log::{error, info};
+use log::{error, info, warn};
+use pangea_client::Client;
 use pangea_client::{
     futures::StreamExt, provider::FuelProvider, query::Bound, requests::fuel::GetSparkOrderRequest,
     ClientBuilder, Format, WsProvider,
@@ -8,12 +9,12 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::str::FromStr;
 use std::sync::Arc;
+use tokio::sync::watch;
+use tokio::time::{timeout, Duration};
 
 use crate::config::settings::Settings;
 use crate::error::Error;
-use crate::indexer::spot_order::OrderStatus;
-use crate::indexer::spot_order::OrderType;
-use crate::indexer::spot_order::SpotOrder;
+use crate::indexer::spot_order::{OrderStatus, OrderType, SpotOrder};
 use crate::storage::order_book::OrderBook;
 
 use super::spot_order::LimitType;
@@ -72,9 +73,31 @@ pub async fn start_pangea_indexer(
 
     info!("Pangea ws client created. Trying to connect");
 
-    let mut last_processed_block: i64 = 0;
     let contract_start_block: i64 = config.contract.contract_block;
-    let contract_h256 = H256::from_str(&config.contract.contract_id).unwrap(); //NTD Remove unwrap
+    let contract_h256 = H256::from_str(&config.contract.contract_id).unwrap();
+    info!("Fetching historical orders...");
+    let last_processed_block = load_historical_orders(
+        &client,
+        contract_start_block,
+        contract_h256,
+        order_book.clone(),
+    )
+    .await?;
+
+    info!("======");
+    info!("Historical orders loaded, starting real time order stream...");
+    start_real_time_stream(&client, last_processed_block, contract_h256, order_book).await?;
+
+    Ok(())
+}
+
+pub async fn load_historical_orders(
+    client: &Client<WsProvider>,
+    contract_start_block: i64,
+    contract_h256: H256,
+    order_book: Arc<OrderBook>,
+) -> Result<i64, Error> {
+    let mut last_processed_block = contract_start_block;
 
     let request_all = GetSparkOrderRequest {
         from_block: Bound::Exact(contract_start_block),
@@ -83,6 +106,7 @@ pub async fn start_pangea_indexer(
         ..Default::default()
     };
 
+    info!("Loading all historical orders...");
     let stream_all = client
         .get_fuel_spark_orders_by_format(request_all, Format::JsonStream, false)
         .await
@@ -90,7 +114,6 @@ pub async fn start_pangea_indexer(
 
     pangea_client::futures::pin_mut!(stream_all);
 
-    info!("Starting to load all historical orders...");
     while let Some(data) = stream_all.next().await {
         match data {
             Ok(data) => {
@@ -105,44 +128,62 @@ pub async fn start_pangea_indexer(
             }
         }
     }
-    if last_processed_block == 0 {
-        last_processed_block = contract_start_block;
+
+    if last_processed_block == contract_start_block {
+        warn!("No historical orders found.");
     }
 
-    info!("Switching to listening for new orders (deltas)");
+    Ok(last_processed_block)
+}
 
+async fn start_real_time_stream(
+    client: &Client<WsProvider>,
+    last_processed_block: i64,
+    contract_h256: H256,
+    order_book: Arc<OrderBook>,
+) -> Result<(), Error> {
+    let (shutdown_tx, shutdown_rx) = watch::channel(false);
     loop {
-        let request_deltas = GetSparkOrderRequest {
-            from_block: Bound::Exact(last_processed_block + 1),
-            to_block: Bound::Latest,
-            market_id__in: HashSet::from([contract_h256]),
-            ..Default::default()
-        };
+        if *shutdown_rx.borrow() {
+            warn!("Shutting down old connection before restarting");
+            return Ok(());
+        }
 
         let stream_deltas = client
-            .get_fuel_spark_orders_by_format(request_deltas, Format::JsonStream, true)
+            .get_fuel_spark_orders_by_format(
+                GetSparkOrderRequest {
+                    from_block: Bound::Exact(last_processed_block + 1),
+                    to_block: Bound::Subscribe,
+                    market_id__in: HashSet::from([contract_h256]),
+                    ..Default::default()
+                },
+                Format::JsonStream,
+                true,
+            )
             .await
             .expect("Failed to get fuel spark deltas");
 
         pangea_client::futures::pin_mut!(stream_deltas);
 
-        while let Some(data) = stream_deltas.next().await {
-            match data {
+        while let Ok(Some(data_result)) =
+            timeout(Duration::from_secs(20), stream_deltas.next()).await
+        {
+            match data_result {
                 Ok(data) => {
                     let data = String::from_utf8(data).unwrap();
                     let order: PangeaOrderEvent = serde_json::from_str(&data).unwrap();
-                    last_processed_block = order.block_number;
                     handle_order_event(order_book.clone(), order).await;
                 }
                 Err(e) => {
-                    error!("Error in the stream of new orders (deltas): {e}");
+                    error!("Error in real-time stream: {e}");
+                    shutdown_tx.send(true).unwrap();
                     break;
                 }
             }
         }
 
-        info!("Reconnecting to listen for new deltas...");
-        tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+        warn!("Reconnecting after no data for 20 seconds or stream error...");
+        tokio::time::sleep(Duration::from_secs(5)).await;
     }
 }
 
@@ -220,11 +261,6 @@ pub fn process_trade(
                             order.amount -= trade_amount;
                             order.status = Some(OrderStatus::PartiallyMatched);
                             order_book.update_order(order.clone());
-
-                            info!(
-                                    "Updated order with id: {} - partially matched, remaining amount: {}",
-                                    order_id, order.amount
-                                );
                         } else {
                             order.status = Some(OrderStatus::Matched);
                             order_book.remove_order(order_id, Some(order_type));
