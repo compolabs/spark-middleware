@@ -3,7 +3,7 @@ use crate::indexer::spot_order::SpotOrder;
 use crate::matchers::types::{MatcherRequest, MatcherResponse};
 use crate::storage::order_book::OrderBook;
 use futures_util::{SinkExt, StreamExt};
-use log::{info,error};
+use log::{error, info};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use tokio::net::TcpStream;

@@ -17,8 +17,6 @@ pub struct IndexerSettings {
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct WebSocketSettings {
-    pub envio_url: String,
-    pub subsquid_url: String,
     pub pangea_username: String,
     pub pangea_pass: String,
     pub pangea_url: String,

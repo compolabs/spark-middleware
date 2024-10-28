@@ -1,7 +1,7 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use crate::error::Error;
+use crate::error::{self, Error};
 
 // NTD Adapt spark-sdk OrderType to that type
 #[derive(Debug, PartialEq, Eq, Clone, Copy, JsonSchema, Serialize, Deserialize)]
@@ -114,7 +114,7 @@ impl SpotOrder {
         let order_type = match order.order_type.as_str() {
             "Buy" => OrderType::Buy,
             "Sell" => OrderType::Sell,
-            _ => return Err("Unknown order type".into()),
+            a => return Err(error::Error::UnknownOrderType(a.to_string())),
         };
 
         Ok(SpotOrder {
