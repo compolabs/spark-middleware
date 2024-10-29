@@ -1,4 +1,5 @@
 use ethers_core::types::H256;
+use fuels::accounts::provider::Provider;
 use log::{error, info};
 use pangea_client::{ChainId, Client};
 use pangea_client::{
@@ -63,6 +64,16 @@ async fn create_pangea_client(config: &Settings) -> Result<Client<WsProvider>, E
     Ok(client)
 }
 
+async fn get_latest_block(chain_id: ChainId) -> Result<i64, Error> {
+    let provider_url = match chain_id {
+        ChainId::FUEL => Ok("mainnet.fuel.network"),
+        ChainId::FUELTESTNET => Ok("testnet.fuel.network"),
+        _ => Err(Error::UnknownChainIdError)
+    }?;
+    let provider = Provider::connect(provider_url).await?;
+    Ok(provider.latest_block_height().await.map(|height| height as i64)?)
+}
+
 async fn fetch_historical_data(
     client: &Client<WsProvider>,
     order_book: &Arc<OrderBook>,
@@ -70,37 +81,49 @@ async fn fetch_historical_data(
     contract_h256: H256,
 ) -> Result<i64, Error> {
     let fuel_chain = ChainId::FUEL;
-    let request_all = GetSparkOrderRequest {
-        from_block: Bound::Exact(contract_start_block),
-        to_block: Bound::Latest,
-        market_id__in: HashSet::from([contract_h256]),
-        chains: HashSet::from([fuel_chain]),
-        ..Default::default()
-    };
+    let batch_size = 10_000;
+    let mut last_processed_block = contract_start_block;
 
-    let stream_all = client
-        .get_fuel_spark_orders_by_format(request_all, Format::JsonStream, false)
-        .await
-        .expect("Failed to get fuel spark orders");
+    let target_latest_block = get_latest_block(fuel_chain).await?;
+    info!("Target last block for processing: {}", target_latest_block);
 
-    pangea_client::futures::pin_mut!(stream_all);
+    while last_processed_block < target_latest_block {
+        let to_block = (last_processed_block + batch_size).min(target_latest_block);
 
-    info!("Starting to load all historical orders...");
-    let mut last_processed_block = 0;
+        let request_batch = GetSparkOrderRequest {
+            from_block: Bound::Exact(last_processed_block),
+            to_block: Bound::Exact(to_block),
+            market_id__in: HashSet::from([contract_h256]),
+            chains: HashSet::from([fuel_chain]),
+            ..Default::default()
+        };
 
-    while let Some(data) = stream_all.next().await {
-        match data {
-            Ok(data) => {
-                let data = String::from_utf8(data)?;
-                let order: PangeaOrderEvent = serde_json::from_str(&data)?;
-                last_processed_block = order.block_number;
-                handle_order_event(order_book.clone(), order).await;
-            }
-            Err(e) => {
-                error!("Error in the stream of historical orders: {e}");
-                break;
+        let stream_batch = client
+            .get_fuel_spark_orders_by_format(request_batch, Format::JsonStream, false)
+            .await
+            .expect("Failed to get fuel spark orders batch");
+
+        pangea_client::futures::pin_mut!(stream_batch);
+
+        while let Some(data) = stream_batch.next().await {
+            match data {
+                Ok(data) => {
+                    let data = String::from_utf8(data)?;
+                    let order: PangeaOrderEvent = serde_json::from_str(&data)?;
+                    handle_order_event(order_book.clone(), order).await;
+                }
+                Err(e) => {
+                    error!("Error in the stream of historical orders: {e}");
+                    break;
+                }
             }
         }
+
+        last_processed_block = to_block;
+        info!(
+            "Processed events up to block {}. Moving to the next batch...",
+            last_processed_block
+        );
     }
 
     Ok(last_processed_block)
