@@ -1,6 +1,6 @@
 use ethers_core::types::H256;
 use log::{error, info};
-use pangea_client::Client;
+use pangea_client::{ChainId, Client};
 use pangea_client::{
     futures::StreamExt, provider::FuelProvider, query::Bound, requests::fuel::GetSparkOrderRequest,
     ClientBuilder, Format, WsProvider,
@@ -51,7 +51,7 @@ async fn start_pangea_indexer(config: Settings, order_book: Arc<OrderBook>) -> R
 async fn create_pangea_client(config: &Settings) -> Result<Client<WsProvider>, Error> {
     let username = &config.websockets.pangea_username;
     let password = &config.websockets.pangea_pass;
-    let url = "fuel.beta.pangea.foundation";
+    let url = "app.pangea.foundation";
 
     let client = ClientBuilder::default()
         .endpoint(url)
@@ -69,10 +69,12 @@ async fn fetch_historical_data(
     contract_start_block: i64,
     contract_h256: H256,
 ) -> Result<i64, Error> {
+    let fuel_chain = ChainId::FUEL;
     let request_all = GetSparkOrderRequest {
         from_block: Bound::Exact(contract_start_block),
         to_block: Bound::Latest,
         market_id__in: HashSet::from([contract_h256]),
+        chains: HashSet::from([fuel_chain]),
         ..Default::default()
     };
 
@@ -111,10 +113,12 @@ async fn listen_for_new_deltas(
     contract_h256: H256,
 ) -> Result<(), Error> {
     loop {
+        let fuel_chain = ChainId::FUEL;
         let request_deltas = GetSparkOrderRequest {
             from_block: Bound::Exact(last_processed_block + 1),
             to_block: Bound::Subscribe,
             market_id__in: HashSet::from([contract_h256]),
+            chains: HashSet::from([fuel_chain]),
             ..Default::default()
         };
 
