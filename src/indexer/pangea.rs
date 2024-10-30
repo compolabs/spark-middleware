@@ -10,19 +10,18 @@ use std::collections::HashSet;
 use std::str::FromStr;
 use std::sync::Arc;
 
-use crate::config::settings::Settings;
+use crate::config::env::ev;
 use crate::error::Error;
 use crate::indexer::order_event_handler::handle_order_event;
 use crate::indexer::order_event_handler::PangeaOrderEvent;
 use crate::storage::order_book::OrderBook;
 
 pub async fn initialize_pangea_indexer(
-    settings: Arc<Settings>,
     tasks: &mut Vec<tokio::task::JoinHandle<()>>,
     order_book: Arc<OrderBook>,
 ) -> Result<(), Error> {
     let ws_task_pangea = tokio::spawn(async move {
-        if let Err(e) = start_pangea_indexer((*settings).clone(), order_book).await {
+        if let Err(e) = start_pangea_indexer(order_book).await {
             eprintln!("Pangea error: {}", e);
         }
     });
@@ -31,11 +30,11 @@ pub async fn initialize_pangea_indexer(
     Ok(())
 }
 
-async fn start_pangea_indexer(config: Settings, order_book: Arc<OrderBook>) -> Result<(), Error> {
-    let client = create_pangea_client(&config).await?;
+async fn start_pangea_indexer(order_book: Arc<OrderBook>) -> Result<(), Error> {
+    let client = create_pangea_client().await?;
 
-    let contract_start_block: i64 = config.contract.contract_block;
-    let contract_h256 = H256::from_str(&config.contract.contract_id)?;
+    let contract_start_block: i64 = ev("CONTRACT_START_BLOCK")?.parse()?;
+    let contract_h256 = H256::from_str(&ev("CONTRACT_ID")?)?;
 
     let mut last_processed_block =
         fetch_historical_data(&client, &order_book, contract_start_block, contract_h256).await?;
@@ -49,13 +48,14 @@ async fn start_pangea_indexer(config: Settings, order_book: Arc<OrderBook>) -> R
     listen_for_new_deltas(&client, &order_book, last_processed_block, contract_h256).await
 }
 
-async fn create_pangea_client(config: &Settings) -> Result<Client<WsProvider>, Error> {
-    let username = &config.websockets.pangea_username;
-    let password = &config.websockets.pangea_pass;
-    let url = "app.pangea.foundation";
+async fn create_pangea_client() -> Result<Client<WsProvider>, Error> {
+
+    let username = ev("PANGEA_USERNAME")?; 
+    let password = ev("PANGEA_PASSWORD")?; 
+    let url = ev("PANGEA_URL")?; 
 
     let client = ClientBuilder::default()
-        .endpoint(url)
+        .endpoint(&url)
         .credential(username, password)
         .build::<WsProvider>()
         .await?;

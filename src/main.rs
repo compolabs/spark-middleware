@@ -1,4 +1,4 @@
-use config::settings::Settings;
+use config::env::ev;
 use error::Error;
 use futures_util::future::FutureExt;
 use futures_util::future::{join_all, select};
@@ -23,27 +23,19 @@ async fn main() -> Result<(), Error> {
     dotenv::dotenv().ok();
     env_logger::init();
 
-    let settings = Arc::new(Settings::new());
     let order_book = Arc::new(OrderBook::new());
     let mut tasks = vec![];
 
-    if settings
-        .settings
-        .active_indexers
-        .contains(&"pangea".to_string())
-    {
-        initialize_pangea_indexer(settings.clone(), &mut tasks, Arc::clone(&order_book)).await?;
-    }
-    let rocket_task = tokio::spawn(run_rocket_server(
-        Arc::clone(&settings),
-        Arc::clone(&order_book),
-    ));
-    tasks.push(rocket_task);
+    initialize_pangea_indexer(&mut tasks, Arc::clone(&order_book)).await?;
 
-    let matcher_websocket = Arc::new(MatcherWebSocket::new(settings.clone(), order_book.clone()));
+    let port = ev("SERVER_PORT")?.parse()?;
+    let rocket_task = tokio::spawn(run_rocket_server(port, Arc::clone(&order_book)));
+    tasks.push(rocket_task);
+    let matcher_ws_port = ev("MATCHERS_PORT")?.parse()?;
+    let matcher_websocket = Arc::new(MatcherWebSocket::new(order_book.clone()));
     let matcher_ws_task = tokio::spawn(run_matcher_websocket_server(
         matcher_websocket.clone(),
-        settings.matchers.matcher_ws_port,
+        matcher_ws_port
     ));
     tasks.push(matcher_ws_task);
 
@@ -63,8 +55,8 @@ async fn main() -> Result<(), Error> {
     Ok(())
 }
 
-async fn run_rocket_server(settings: Arc<Settings>, order_book: Arc<OrderBook>) {
-    let rocket = rocket(settings, order_book);
+async fn run_rocket_server(port: u16, order_book: Arc<OrderBook>) {
+    let rocket = rocket(port, order_book);
     let _ = rocket.launch().await;
 }
 

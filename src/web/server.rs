@@ -1,6 +1,5 @@
 use std::sync::Arc;
 
-use crate::config::settings::Settings;
 use crate::storage::order_book::OrderBook;
 use crate::web::routes::{get_docs, get_routes};
 use async_graphql::Schema;
@@ -10,9 +9,9 @@ use rocket_okapi::swagger_ui::make_swagger_ui;
 use super::graphql::Query;
 use super::routes::get_graphql_routes;
 
-pub fn rocket(settings: Arc<Settings>, order_book: Arc<OrderBook>) -> Rocket<Build> {
+pub fn rocket(port: u16, order_book: Arc<OrderBook>) -> Rocket<Build> {
     let config = Config {
-        port: settings.server.server_port,
+        port,
         ..Config::default()
     };
 
