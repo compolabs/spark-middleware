@@ -1,4 +1,5 @@
 use std::sync::Arc;
+use std::net::Ipv4Addr;
 
 use crate::storage::order_book::OrderBook;
 use crate::web::routes::{get_docs, get_routes};
@@ -11,6 +12,7 @@ use super::routes::get_graphql_routes;
 
 pub fn rocket(port: u16, order_book: Arc<OrderBook>) -> Rocket<Build> {
     let config = Config {
+        address: Ipv4Addr::new(0, 0, 0, 0).into(),
         port,
         ..Config::default()
     };
