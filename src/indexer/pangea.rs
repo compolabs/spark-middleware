@@ -80,7 +80,10 @@ async fn fetch_historical_data(
     contract_start_block: i64,
     contract_h256: H256,
 ) -> Result<i64, Error> {
-    let fuel_chain = ChainId::FUEL;
+    let fuel_chain = match ev("CHAIN")?.as_str() { 
+        "MAINNET" => ChainId::FUEL,
+        _ => ChainId::FUELTESTNET,
+    };
     let batch_size = 10_000;
     let mut last_processed_block = contract_start_block;
 
@@ -136,7 +139,10 @@ async fn listen_for_new_deltas(
     contract_h256: H256,
 ) -> Result<(), Error> {
     loop {
-        let fuel_chain = ChainId::FUEL;
+        let fuel_chain = match ev("CHAIN")?.as_str() { 
+            "MAINNET" => ChainId::FUEL,
+            _ => ChainId::FUELTESTNET,
+        };
         let request_deltas = GetSparkOrderRequest {
             from_block: Bound::Exact(last_processed_block + 1),
             to_block: Bound::Subscribe,
