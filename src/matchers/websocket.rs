@@ -1,4 +1,4 @@
-use crate::config::settings::Settings;
+use crate::config::env::ev;
 use crate::indexer::spot_order::SpotOrder;
 use crate::matchers::types::{MatcherRequest, MatcherResponse};
 use crate::storage::order_book::OrderBook;
@@ -14,15 +14,13 @@ use tokio_tungstenite::WebSocketStream;
 use super::types::{MatcherConnectRequest, MatcherOrderUpdate};
 
 pub struct MatcherWebSocket {
-    pub settings: Arc<Settings>,
     pub order_book: Arc<OrderBook>,
     pub matching_orders: Arc<Mutex<HashMap<String, HashSet<String>>>>,
 }
 
 impl MatcherWebSocket {
-    pub fn new(settings: Arc<Settings>, order_book: Arc<OrderBook>) -> Self {
+    pub fn new(order_book: Arc<OrderBook>) -> Self {
         Self {
-            settings,
             order_book,
             matching_orders: Arc::new(Mutex::new(HashMap::new())),
         }
@@ -68,7 +66,7 @@ impl MatcherWebSocket {
         write: &mut futures_util::stream::SplitSink<WebSocketStream<TcpStream>, Message>,
         uuid: String,
     ) {
-        let batch_size = self.settings.matchers.batch_size;
+        let batch_size = ev("BATCH_SIZE").unwrap().parse().unwrap(); 
         let available_orders = self.get_available_orders(batch_size, &uuid).await;
 
         let response = if available_orders.is_empty() {

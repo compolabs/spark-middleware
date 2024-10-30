@@ -3,30 +3,8 @@ use std::fs;
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct Settings {
-    pub settings: IndexerSettings,
-    pub websockets: WebSocketSettings,
-    pub contract: ContractSettings,
     pub matchers: MatchersSettings,
     pub server: ServerSettings,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-pub struct IndexerSettings {
-    pub active_indexers: Vec<String>,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-pub struct WebSocketSettings {
-    pub pangea_username: String,
-    pub pangea_pass: String,
-    pub pangea_url: String,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-pub struct ContractSettings {
-    pub contract_id: String,
-    pub contract_block: i64,
-    pub order_limit: i32,
 }
 
 #[derive(Debug, Clone, Deserialize)]

@@ -1,9 +1,11 @@
 use std::num::ParseIntError;
-
 use thiserror::Error;
 
 #[derive(Error, Debug)]
 pub enum Error {
+    #[error("Fuel error: {0}")]
+    Fuel(#[from] fuels::types::errors::Error),
+
     #[error("Failed to retrieve environment variable '{0}': {1}")]
     EnvVarError(String, String),
 
@@ -33,6 +35,9 @@ pub enum Error {
 
     #[error("Parsing error: {0}")]
     ParsingError(#[from] ParsingError),
+
+    #[error("Unknown chain id")]
+    UnknownChainIdError
 }
 
 #[derive(Error, Debug)]
