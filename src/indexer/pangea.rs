@@ -81,7 +81,7 @@ async fn fetch_historical_data(
     contract_h256: H256,
 ) -> Result<i64, Error> {
     let fuel_chain = match ev("CHAIN")?.as_str() { 
-        "MAINNET" => ChainId::FUEL,
+        "FUEL" => ChainId::FUEL,
         _ => ChainId::FUELTESTNET,
     };
     let batch_size = 10_000;
@@ -140,7 +140,7 @@ async fn listen_for_new_deltas(
 ) -> Result<(), Error> {
     loop {
         let fuel_chain = match ev("CHAIN")?.as_str() { 
-            "MAINNET" => ChainId::FUEL,
+            "FUEL" => ChainId::FUEL,
             _ => ChainId::FUELTESTNET,
         };
         let request_deltas = GetSparkOrderRequest {

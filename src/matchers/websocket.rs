@@ -4,8 +4,10 @@ use crate::matchers::types::{MatcherRequest, MatcherResponse};
 use crate::storage::order_book::OrderBook;
 use futures_util::{SinkExt, StreamExt};
 use log::{error, info};
+use tokio::time;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
+use std::time::Duration;
 use tokio::net::TcpStream;
 use tokio::sync::Mutex;
 use tokio_tungstenite::tungstenite::protocol::Message;
@@ -31,6 +33,8 @@ impl MatcherWebSocket {
 
         let mut matcher_uuid: Option<String> = None;
 
+        let clear_task = tokio::spawn(self.clone().clear_matching_orders_periodically());
+
         while let Some(Ok(message)) = read.next().await {
             if let Message::Text(text) = message {
                 match serde_json::from_str::<MatcherRequest>(&text) {
@@ -46,7 +50,6 @@ impl MatcherWebSocket {
                     }
                     Ok(MatcherRequest::Connect(MatcherConnectRequest { uuid })) => {
                         matcher_uuid = Some(uuid.clone());
-                        // Инициализируем matching_orders для нового матчера
                         let mut matching_orders = self.matching_orders.lock().await;
                         matching_orders
                             .entry(uuid.clone())
@@ -200,5 +203,15 @@ impl MatcherWebSocket {
 
         let mut matching_orders = self.matching_orders.lock().await;
         matching_orders.remove(&order.id);
+    }
+
+    async fn clear_matching_orders_periodically(self: Arc<Self>) {
+        let mut interval = time::interval(Duration::from_secs(5));
+        loop {
+            interval.tick().await;
+            let mut matching_orders = self.matching_orders.lock().await;
+            matching_orders.clear();
+            info!("Cleared matching_orders");
+        }
     }
 }
