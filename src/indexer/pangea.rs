@@ -6,9 +6,11 @@ use pangea_client::{
     futures::StreamExt, provider::FuelProvider, query::Bound, requests::fuel::GetSparkOrderRequest,
     ClientBuilder, Format, WsProvider,
 };
+use tokio::time::sleep;
 use std::collections::HashSet;
 use std::str::FromStr;
 use std::sync::Arc;
+use std::time::Duration;
 
 use crate::config::env::ev;
 use crate::error::Error;
@@ -138,11 +140,21 @@ async fn listen_for_new_deltas(
     mut last_processed_block: i64,
     contract_h256: H256,
 ) -> Result<(), Error> {
+    let max_retries = 5;
+    let mut retry_count = 0;
+    let retry_delay = Duration::from_secs(5);
+
     loop {
-        let fuel_chain = match ev("CHAIN")?.as_str() { 
+        if retry_count > max_retries {
+            error!("Maximum number of retries exceeded. Exiting listen_for_new_deltas.");
+            return Err(Error::MaxRetriesExceeded);
+        }
+
+        let fuel_chain = match ev("CHAIN")?.as_str() {
             "FUEL" => ChainId::FUEL,
             _ => ChainId::FUELTESTNET,
         };
+
         let request_deltas = GetSparkOrderRequest {
             from_block: Bound::Exact(last_processed_block + 1),
             to_block: Bound::Subscribe,
@@ -151,29 +163,58 @@ async fn listen_for_new_deltas(
             ..Default::default()
         };
 
-        let stream_deltas = client
+        let stream_deltas_result = client
             .get_fuel_spark_orders_by_format(request_deltas, Format::JsonStream, true)
-            .await
-            .expect("Failed to get fuel spark deltas");
+            .await;
+
+        let stream_deltas = match stream_deltas_result {
+            Ok(stream) => {
+                retry_count = 0;
+                stream
+            }
+            Err(e) => {
+                error!("Failed to initiate stream: {}", e);
+                retry_count += 1;
+                error!("Retrying in {} seconds...", retry_delay.as_secs());
+                sleep(retry_delay).await;
+                continue;
+            }
+        };
 
         pangea_client::futures::pin_mut!(stream_deltas);
 
-        while let Some(data) = stream_deltas.next().await {
-            match data {
+        while let Some(data_result) = stream_deltas.next().await {
+            match data_result {
                 Ok(data) => {
-                    let data = String::from_utf8(data)?;
-                    let order: PangeaOrderEvent = serde_json::from_str(&data)?;
-                    last_processed_block = order.block_number;
-                    handle_order_event(order_book.clone(), order).await;
+                    retry_count = 0;
+
+                    if let Err(e) = process_order_data(&data, order_book, &mut last_processed_block).await {
+                        error!("Failed to process order data: {}", e);
+                    }
                 }
                 Err(e) => {
-                    error!("Error in the stream of new orders (deltas): {e}");
+                    error!("Error in the stream of new orders (deltas): {}", e);
+                    retry_count += 1;
+                    error!("Retrying connection in {} seconds...", retry_delay.as_secs());
+                    sleep(retry_delay).await;
                     break;
                 }
             }
         }
 
         info!("Reconnecting to listen for new deltas...");
-        tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+        sleep(retry_delay).await;
     }
+}
+
+async fn process_order_data(
+    data: &[u8],
+    order_book: &Arc<OrderBook>,
+    last_processed_block: &mut i64,
+) -> Result<(), Error> {
+    let data_str = String::from_utf8(data.to_vec())?;
+    let order_event: PangeaOrderEvent = serde_json::from_str(&data_str)?;
+    *last_processed_block = order_event.block_number;
+    handle_order_event(order_book.clone(), order_event).await;
+    Ok(())
 }

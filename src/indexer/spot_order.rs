@@ -48,7 +48,7 @@ impl Ord for SpotOrder {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
         self.price
             .cmp(&other.price)
-            .then_with(|| self.timestamp.cmp(&other.timestamp)) // Сравниваем по времени, если цена одинаковая
+            .then_with(|| self.timestamp.cmp(&other.timestamp)) 
     }
 }
 

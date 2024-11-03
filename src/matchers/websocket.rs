@@ -33,7 +33,7 @@ impl MatcherWebSocket {
 
         let mut matcher_uuid: Option<String> = None;
 
-        let clear_task = tokio::spawn(self.clone().clear_matching_orders_periodically());
+        let _clear_task = tokio::spawn(self.clone().clear_matching_orders_periodically());
 
         while let Some(Ok(message)) = read.next().await {
             if let Message::Text(text) = message {

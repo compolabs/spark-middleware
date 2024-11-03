@@ -37,7 +37,10 @@ pub enum Error {
     ParsingError(#[from] ParsingError),
 
     #[error("Unknown chain id")]
-    UnknownChainIdError
+    UnknownChainIdError,
+
+    #[error("Pangea ws max retries exceeded")]
+    MaxRetriesExceeded
 }
 
 #[derive(Error, Debug)]

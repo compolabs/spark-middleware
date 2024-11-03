@@ -120,7 +120,7 @@ pub async fn graphql_handler(
     schema: &State<Schema<Query, EmptyMutation, EmptySubscription>>,
     request: GraphQLRequest,
 ) -> GraphQLResponse {
-    request.execute(&**schema).await // Разыменовываем State
+    request.execute(&**schema).await 
 }
 
 #[rocket::get("/graphql/playground")]
