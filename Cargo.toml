@@ -5,7 +5,7 @@ edition = "2021"
 
 
 [dependencies]
-anyhow = "1.0.86"
+anyhow = "1.0.92"
 async-tungstenite = { version = "0.14", features = ["tokio-runtime"] }
 async-graphql = "7.0.9"
 async-graphql-rocket = "7.0.9"
@@ -25,10 +25,10 @@ rustc-hex = "2.1.0"
 schemars = "0.8.0"
 serde = { version = "1.0.198", features = ["derive"] }
 serde_json = "1.0.116"
-spark-market-sdk = "0.6.3" 
+spark-market-sdk = { git = "https://github.com/compolabs/orderbook-contract"} 
 pangea-client = { git = "https://github.com/nazgull08/pangea-client/"}
 thiserror = "1.0.63"
-tokio = { version = "1.12", features = ["rt", "macros", "time"] }
+tokio = { version = "1.41.0", features = ["rt", "macros", "time"] }
 tokio-tungstenite = "0.17.1"
 toml = "0.5"
 url = "2.3.1"

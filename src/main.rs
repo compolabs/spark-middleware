@@ -4,6 +4,7 @@ use futures_util::future::FutureExt;
 use futures_util::future::{join_all, select};
 use indexer::pangea::initialize_pangea_indexer;
 use matchers::websocket::MatcherWebSocket;
+use storage::matching_orders::MatchingOrders;
 use std::sync::Arc;
 use storage::order_book::OrderBook;
 use tokio::net::TcpListener;
@@ -24,6 +25,7 @@ async fn main() -> Result<(), Error> {
     env_logger::init();
 
     let order_book = Arc::new(OrderBook::new());
+    let matching_orders = Arc::new(MatchingOrders::new());
     let mut tasks = vec![];
 
     initialize_pangea_indexer(&mut tasks, Arc::clone(&order_book)).await?;
