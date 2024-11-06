@@ -5157,7 +5157,7 @@ dependencies = [
 [[package]]
 name = "pangea-client"
 version = "0.2.6"
-source = "git+https://github.com/nazgull08/pangea-client/#323bbc03d4fdfe294c68f4459499659bb3be3e9d"
+source = "git+https://github.com/nazgull08/pangea-client/#ab62a67ab30096b547558f94b677c90345115111"
 dependencies = [
  "async-trait",
  "base64 0.22.1",
@@ -8443,9 +8443,9 @@ dependencies = [
 
 [[package]]
 name = "xml-rs"
-version = "0.8.22"
+version = "0.8.23"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "af4e2e2f7cba5a093896c1e150fbfe177d1883e7448200efb81d40b9d339ef26"
+checksum = "af310deaae937e48a26602b730250b4949e125f468f11e6990be3e5304ddd96f"
 
 [[package]]
 name = "xmltree"

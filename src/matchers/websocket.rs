@@ -1,13 +1,12 @@
 use crate::config::env::ev;
 use crate::indexer::spot_order::SpotOrder;
 use crate::matchers::types::{MatcherRequest, MatcherResponse};
+use crate::storage::matching_orders::MatchingOrders;
 use crate::storage::order_book::OrderBook;
 use futures_util::{SinkExt, StreamExt};
 use log::{error, info};
-use std::collections::HashSet;
 use std::sync::Arc;
 use tokio::net::TcpStream;
-use tokio::sync::Mutex;
 use tokio_tungstenite::tungstenite::protocol::Message;
 use tokio_tungstenite::WebSocketStream;
 
@@ -15,14 +14,16 @@ use super::types::{MatcherConnectRequest, MatcherOrderUpdate};
 
 pub struct MatcherWebSocket {
     pub order_book: Arc<OrderBook>,
-    pub matching_orders: Arc<Mutex<HashSet<String>>>,  
+    pub matching_orders: Arc<MatchingOrders>
 }
 
 impl MatcherWebSocket {
-    pub fn new(order_book: Arc<OrderBook>) -> Self {
+    pub fn new(order_book: Arc<OrderBook>,
+        matching_orders: Arc<MatchingOrders>,
+    ) -> Self {
         Self {
             order_book,
-            matching_orders: Arc::new(Mutex::new(HashSet::new())),
+            matching_orders, 
         }
     }
 
@@ -74,33 +75,20 @@ impl MatcherWebSocket {
         if let Err(e) = write.send(Message::Text(response_text)).await {
             error!("Failed to send response to matcher {}: {}", uuid, e);
 
-            
-            let mut matching_orders = self.matching_orders.lock().await;
             for order in available_orders {
-                matching_orders.remove(&order.id);
+                self.matching_orders.remove(&order.id);
             }
         }
     }
 
     async fn handle_order_updates(&self, order_updates: Vec<MatcherOrderUpdate>, _uuid: String) {
         info!("Processing order updates: {:?}", order_updates);
-
-        let mut matching_orders = self.matching_orders.lock().await;
-        for update in order_updates {
-            matching_orders.remove(&update.order_id);
-            info!("Order {} removed from matching_orders", update.order_id);
-        }
     }
 
     async fn get_available_orders(&self, batch_size: usize) -> Vec<SpotOrder> {
         let mut available_orders = Vec::new();
 
-        
-        let matching_order_ids = {
-            let matching_orders = self.matching_orders.lock().await;
-            matching_orders.clone()
-        };
-
+        let matching_order_ids = self.matching_orders.get_all();
         
         let buy_orders = self.order_book.get_buy_orders()
             .values()
@@ -166,11 +154,9 @@ impl MatcherWebSocket {
         }
 
         
-        {
-            let mut matching_orders = self.matching_orders.lock().await;
-            for order_id in new_matching_order_ids {
-                matching_orders.insert(order_id);
-            }
+        for order_id in new_matching_order_ids {
+            self.matching_orders.add(&order_id);
+            info!("----Order {} added to matching_orders", order_id);
         }
 
         available_orders

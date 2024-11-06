@@ -28,13 +28,13 @@ async fn main() -> Result<(), Error> {
     let matching_orders = Arc::new(MatchingOrders::new());
     let mut tasks = vec![];
 
-    initialize_pangea_indexer(&mut tasks, Arc::clone(&order_book)).await?;
+    initialize_pangea_indexer(&mut tasks, Arc::clone(&order_book), Arc::clone(&matching_orders)).await?;
 
     let port = ev("SERVER_PORT")?.parse()?;
     let rocket_task = tokio::spawn(run_rocket_server(port, Arc::clone(&order_book)));
     tasks.push(rocket_task);
     let matcher_ws_port = ev("MATCHERS_PORT")?.parse()?;
-    let matcher_websocket = Arc::new(MatcherWebSocket::new(order_book.clone()));
+    let matcher_websocket = Arc::new(MatcherWebSocket::new(order_book.clone(), matching_orders.clone()));
     let matcher_ws_task = tokio::spawn(run_matcher_websocket_server(
         matcher_websocket.clone(),
         matcher_ws_port

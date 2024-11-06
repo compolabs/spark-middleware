@@ -1,4 +1,5 @@
 use crate::indexer::spot_order::{LimitType, OrderStatus, OrderType, SpotOrder};
+use crate::storage::matching_orders::MatchingOrders;
 use crate::storage::order_book::OrderBook;
 use chrono::Utc;
 use log::{error, info};
@@ -27,7 +28,8 @@ pub struct PangeaOrderEvent {
     pub limit_type: Option<String>,
 }
 
-pub async fn handle_order_event(order_book: Arc<OrderBook>, event: PangeaOrderEvent) {
+pub async fn handle_order_event(order_book: Arc<OrderBook>, matching_orders: Arc<MatchingOrders>,
+    event: PangeaOrderEvent) {
     if let Some(event_type) = event.event_type.as_deref() {
         match event_type {
             "Open" => {
@@ -37,6 +39,8 @@ pub async fn handle_order_event(order_book: Arc<OrderBook>, event: PangeaOrderEv
                 }
             }
             "Trade" => {
+                matching_orders.remove(&event.order_id);
+                info!("Order {} removed from matching_orders", &event.order_id);
                 if let Some(match_size) = event.amount {
                     let o_type = event.order_type_to_enum();
                     let l_type = event.limit_type_to_enum();
@@ -44,6 +48,8 @@ pub async fn handle_order_event(order_book: Arc<OrderBook>, event: PangeaOrderEv
                 }
             }
             "Cancel" => {
+                matching_orders.remove(&event.order_id);
+                info!("Order {} removed from matching_orders", &event.order_id);
                 order_book.remove_order(&event.order_id, event.order_type_to_enum());
                 info!(
                     "Removed order with id: {} due to Cancel event",
