@@ -157,7 +157,15 @@ async fn listen_for_new_deltas(
         tokio::select! {
             _ = reconnect_timer.tick(), if !processing => {
                 info!("Scheduled reconnect to refresh connection...");
-                processing = false; // Сбросим состояние processing
+                processing = false; 
+                let fuel_chain = match ev("CHAIN")?.as_str() {
+                    "FUEL" => ChainId::FUEL,
+                    _ => ChainId::FUELTESTNET,
+                };
+                let latest_block = get_latest_block(fuel_chain).await?;
+                let buffer_blocks = 10; 
+                last_processed_block = latest_block.saturating_sub(buffer_blocks);
+                info!("Updated last_processed_block to {}", last_processed_block);
             },
             result = async {
                 processing = true;
