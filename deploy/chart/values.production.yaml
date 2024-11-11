@@ -1,0 +1,19 @@
+replicaCount: 1
+
+image:
+  pullPolicy: IfNotPresent
+
+ingress:
+  enabled: true
+  hosts:
+    - host: spark-middleware.production.sprk.fi
+      paths:
+        - path: /
+          pathType: Prefix
+  tls:
+    - secretName: spark-middleware-tls
+      hosts:
+        - spark-middleware.production.sprk.fi
+
+vault:
+  mount: production
