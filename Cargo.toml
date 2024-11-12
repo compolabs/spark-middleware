@@ -6,7 +6,7 @@ edition = "2021"
 
 [dependencies]
 anyhow = "1.0.92"
-async-tungstenite = { version = "0.14", features = ["tokio-runtime"] }
+async-tungstenite = { version = "0.28", features = ["tokio-runtime"] }
 async-graphql = "7.0.9"
 async-graphql-rocket = "7.0.9"
 chrono = { version = "0.4.38", features = ["serde"] }
