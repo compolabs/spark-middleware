@@ -12,8 +12,8 @@ async-graphql-rocket = "7.0.9"
 chrono = { version = "0.4.38", features = ["serde"] }
 ctrlc = "3.4"
 dotenv = "0.15.0"
-fuels = { version = "0.66.5", features = ["fuel-core-lib"] }
-fuel-crypto = "0.57.1"
+fuels = { version = "0.66.10", features = ["fuel-core-lib"] }
+fuel-crypto = "0.58.2"
 futures-util = "0.3"
 hex = "0.4.3"
 log = "0.4.21"
@@ -29,7 +29,7 @@ spark-market-sdk = "0.6.5"
 pangea-client = { git = "https://github.com/nazgull08/pangea-client/"}
 thiserror = "1.0.63"
 tokio = { version = "1.41.0", features = ["rt", "macros", "time"] }
-tokio-tungstenite = "0.17.1"
+tokio-tungstenite = "0.24.0"
 toml = "0.5"
 url = "2.3.1"
 uuid = { version = "1.0", features = ["v4"] }
