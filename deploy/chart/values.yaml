@@ -5,8 +5,7 @@ envFromSecret: spark-middleware
 
 image:
   repository: harbor.infra.sprk.fi/sprk/spark-middleware
-  pullPolicy: Always
-  tag: latest
+  pullPolicy: IfNotPresent
 
 service:
   type: ClusterIP

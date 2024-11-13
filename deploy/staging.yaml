@@ -1,12 +1,15 @@
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
+  annotations:
+    argocd-image-updater.argoproj.io/image-list: harbor.infra.sprk.fi/sprk/spark-middleware:latest
+    argocd-image-updater.argoproj.io/update-strategy: digest
   name: staging-spark-middleware
 spec:
   project: sprk
   source:
     repoURL: https://github.com/compolabs/spark-middleware.git
-    targetRevision: dev
+    targetRevision: master
     path: deploy/chart
     helm:
       valueFiles:

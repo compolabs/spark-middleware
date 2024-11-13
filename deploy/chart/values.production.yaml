@@ -1,8 +1,5 @@
 replicaCount: 1
 
-image:
-  pullPolicy: IfNotPresent
-
 ingress:
   enabled: true
   hosts:
