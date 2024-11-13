@@ -16,6 +16,6 @@ COPY --from=builder /app/target/release/spark-middleware /app/
 
 RUN apt-get update && apt-get install -y libssl1.1 ca-certificates && rm -rf /var/lib/apt/lists/*
 
-EXPOSE 19090
-EXPOSE 19091
+EXPOSE 9002
+EXPOSE 9092
 CMD ["./spark-middleware"]

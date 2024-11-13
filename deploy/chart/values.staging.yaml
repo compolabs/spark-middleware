@@ -1,0 +1,14 @@
+ingress:
+  enabled: true
+  hosts:
+    - host: spark-middleware.staging.sprk.fi
+      paths:
+        - path: /
+          pathType: Prefix
+  tls:
+    - secretName: spark-middleware-tls
+      hosts:
+        - spark-middleware.staging.sprk.fi
+
+vault:
+  mount: staging
