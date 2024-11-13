@@ -7,6 +7,16 @@ image:
   repository: harbor.infra.sprk.fi/sprk/spark-middleware
   pullPolicy: IfNotPresent
 
+livenessProbe:
+  httpGet:
+    path: /livez
+    port: admin
+
+readinessProbe:
+  httpGet:
+    path: /readyz
+    port: admin
+
 service:
   type: ClusterIP
   port: 9002
