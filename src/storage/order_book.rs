@@ -1,4 +1,5 @@
 use std::collections::BTreeMap;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, RwLock};
 
 use crate::indexer::spot_order::{OrderType, SpotOrder};
@@ -6,6 +7,7 @@ use crate::indexer::spot_order::{OrderType, SpotOrder};
 pub struct OrderBook {
     buy_orders: Arc<RwLock<BTreeMap<u128, Vec<SpotOrder>>>>,
     sell_orders: Arc<RwLock<BTreeMap<u128, Vec<SpotOrder>>>>,
+    is_synced: AtomicBool
 }
 
 impl Default for OrderBook {
@@ -13,6 +15,7 @@ impl Default for OrderBook {
         OrderBook {
             buy_orders: Arc::new(RwLock::new(BTreeMap::new())),
             sell_orders: Arc::new(RwLock::new(BTreeMap::new())),
+            is_synced: AtomicBool::new(false),
         }
     }
 }
@@ -112,5 +115,13 @@ impl OrderBook {
         for key in empty_keys {
             target_tree.remove(&key);
         }
+    }
+
+    pub fn mark_as_synced(&self) {
+        self.is_synced.store(true, Ordering::Relaxed);
+    }
+
+    pub fn is_ready(&self) -> bool {
+        self.is_synced.load(Ordering::Relaxed)
     }
 }

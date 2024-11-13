@@ -4,6 +4,7 @@ use futures_util::future::FutureExt;
 use futures_util::future::{join_all, select};
 use indexer::pangea::initialize_pangea_indexer;
 use matchers::websocket::MatcherWebSocket;
+use prometheus::{register_histogram, register_int_counter, register_int_gauge, Histogram, IntCounter, IntGauge};
 use storage::matching_orders::MatchingOrders;
 use std::sync::Arc;
 use storage::order_book::OrderBook;
@@ -11,6 +12,7 @@ use tokio::net::TcpListener;
 use tokio::signal;
 use tokio_tungstenite::accept_async;
 use web::server::rocket;
+use lazy_static::lazy_static;
 
 pub mod config;
 pub mod error;
@@ -18,6 +20,14 @@ pub mod indexer;
 pub mod matchers;
 pub mod storage;
 pub mod web;
+
+lazy_static! {
+    static ref BUY_ORDERS_TOTAL: IntGauge = register_int_gauge!("buy_orders_total", "Total buy orders").unwrap();
+    static ref SELL_ORDERS_TOTAL: IntGauge = register_int_gauge!("sell_orders_total", "Total sell orders").unwrap();
+    static ref ORDER_PROCESSING_DURATION: Histogram = register_histogram!("order_processing_duration_seconds", "Order processing latency").unwrap();
+    static ref ERRORS_TOTAL: IntCounter = register_int_counter!("errors_total", "Total errors").unwrap();
+    static ref SYNC_STATUS: IntGauge = register_int_gauge!("sync_status", "Sync status of the system").unwrap();
+}
 
 #[tokio::main]
 async fn main() -> Result<(), Error> {

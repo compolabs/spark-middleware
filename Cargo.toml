@@ -17,6 +17,7 @@ fuel-crypto = "0.58.2"
 futures-util = "0.3"
 hex = "0.4.3"
 log = "0.4.21"
+lazy_static = "1.5.0"
 env_logger = "0.10"
 ethers-core = "2.0.14"
 rocket = { version = "0.5.0-rc.3", features = ["json"] }
@@ -27,6 +28,7 @@ serde = { version = "1.0.198", features = ["derive"] }
 serde_json = "1.0.116"
 spark-market-sdk = "0.6.5" 
 pangea-client = { git = "https://github.com/nazgull08/pangea-client/"}
+prometheus = "0.13.4"
 thiserror = "1.0.63"
 tokio = { version = "1.41.0", features = ["rt", "macros", "time"] }
 tokio-tungstenite = "0.24.0"

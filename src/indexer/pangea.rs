@@ -18,6 +18,7 @@ use crate::indexer::order_event_handler::handle_order_event;
 use crate::indexer::order_event_handler::PangeaOrderEvent;
 use crate::storage::matching_orders::MatchingOrders;
 use crate::storage::order_book::OrderBook;
+use crate::{BUY_ORDERS_TOTAL, ERRORS_TOTAL, ORDER_PROCESSING_DURATION, SELL_ORDERS_TOTAL, SYNC_STATUS};
 
 pub async fn initialize_pangea_indexer(
     tasks: &mut Vec<tokio::task::JoinHandle<()>>,
@@ -136,7 +137,13 @@ async fn fetch_historical_data(
             last_processed_block
         );
     }
-
+    order_book.mark_as_synced();
+    SYNC_STATUS.set(1);
+    BUY_ORDERS_TOTAL.set(order_book.get_buy_orders().len() as i64);
+    SELL_ORDERS_TOTAL.set(order_book.get_sell_orders().len() as i64);
+    info!("=======");
+    info!("BUY_ORDERS_TOTAL: {}", BUY_ORDERS_TOTAL.get());
+    info!("SELL_ORDERS_TOTAL: {}", SELL_ORDERS_TOTAL.get());
     Ok(last_processed_block)
 }
 
@@ -198,6 +205,7 @@ async fn listen_for_new_deltas(
                                     }
                                 }
                                 Err(e) => {
+                                    ERRORS_TOTAL.inc();
                                     error!("Error in the stream of new orders (deltas): {}", e);
                                     break;
                                 }
@@ -216,6 +224,7 @@ async fn listen_for_new_deltas(
             } => {
                 processing = false;
                 if let Err(e) = result {
+                    ERRORS_TOTAL.inc();
                     error!("Error in listen_for_new_deltas: {:?}", e);
                 }
             },
@@ -229,11 +238,17 @@ async fn process_order_data(
     matching_orders: &Arc<MatchingOrders>,
     last_processed_block: &mut i64,
 ) -> Result<(), Error> {
+    let timer = ORDER_PROCESSING_DURATION.start_timer();
     let data_str = String::from_utf8(data.to_vec())?;
     let order_event: PangeaOrderEvent = serde_json::from_str(&data_str)?;
     *last_processed_block = order_event.block_number;
     handle_order_event(order_book.clone(),
         matching_orders.clone(),
         order_event).await;
+    timer.observe_duration();
+    BUY_ORDERS_TOTAL.set(order_book.get_buy_orders().len() as i64);
+    SELL_ORDERS_TOTAL.set(order_book.get_sell_orders().len() as i64);
+    info!("BUY_ORDERS_TOTAL: {}", BUY_ORDERS_TOTAL.get());
+    info!("SELL_ORDERS_TOTAL: {}", SELL_ORDERS_TOTAL.get());
     Ok(())
 }

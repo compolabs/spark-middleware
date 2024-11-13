@@ -5,6 +5,8 @@ use async_graphql::http::{playground_source, GraphQLPlaygroundConfig};
 use async_graphql::{EmptyMutation, EmptySubscription, Schema};
 use async_graphql_rocket::{GraphQLRequest, GraphQLResponse};
 use log::warn;
+use prometheus::{Encoder, TextEncoder};
+use rocket::http::Status;
 use rocket::request::FromParam;
 use rocket::response::content;
 use rocket::serde::json::Json;
@@ -131,12 +133,42 @@ pub fn graphql_playground() -> content::RawHtml<String> {
     content::RawHtml(playground_source(gqlpgc))
 }
 
+#[openapi]
+#[get("/livez")]
+pub fn livez() -> Status {
+    Status::Ok
+}
+
+#[openapi]
+#[get("/readyz")]
+pub fn readyz(order_book: &State<Arc<OrderBook>>) -> Status {
+    if order_book.is_ready() {
+        Status::Ok
+    } else {
+        Status::ServiceUnavailable
+    }
+}
+
+#[openapi]
+#[get("/metrics")]
+pub fn metrics() -> Result<String, Status> {
+    let encoder = TextEncoder::new();
+    let mut buffer = Vec::new();
+    let metric_families = prometheus::gather();
+    encoder.encode(&metric_families, &mut buffer).unwrap();
+    let metrics = String::from_utf8(buffer).unwrap();
+    Ok(metrics)
+}
+
 pub fn get_routes() -> Vec<Route> {
     openapi_get_routes![
         get_buy_orders,
         get_sell_orders,
         get_indexer_spread,
         get_orders_count,
+        livez,
+        readyz,
+        metrics
     ]
 }
 
