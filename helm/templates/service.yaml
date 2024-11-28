@@ -1,7 +1,8 @@
+{{- range .Values.currency }}
 apiVersion: v1
 kind: Service
 metadata:
-  name: {{ include "helm-chart.fullname" . }}
+  name: {{ include "helm-chart.fullname" . }}-{{ . }}
   labels:
     {{- include "helm-chart.labels" . | nindent 4 }}
 spec:
@@ -17,3 +18,4 @@ spec:
       name: admin
   selector:
     {{- include "helm-chart.selectorLabels" . | nindent 4 }}
+{{- end }}

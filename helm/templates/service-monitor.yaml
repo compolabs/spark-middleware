@@ -1,7 +1,8 @@
+{{- range .Values.currency }}
 apiVersion: monitoring.coreos.com/v1
 kind: ServiceMonitor
 metadata:
-  name: {{ include "helm-chart.fullname" . }}-metrics
+  name: {{ include "helm-chart.fullname" . }}-{{ . }}
 spec:
   selector:
     matchLabels:
@@ -13,3 +14,4 @@ spec:
   namespaceSelector:
     matchNames:
       - {{ .Release.Namespace }}
+{{- end }}

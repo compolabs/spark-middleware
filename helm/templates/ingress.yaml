@@ -1,8 +1,9 @@
 {{- if .Values.ingress.enabled -}}
+{{- range .Values.currency }}
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
-  name: {{ include "helm-chart.fullname" . }}
+  name: {{ include "helm-chart.fullname" . }}-{{ . }}
   labels:
     {{- include "helm-chart.labels" . | nindent 4 }}
   {{- with .Values.ingress.annotations }}
@@ -25,19 +26,26 @@ spec:
   {{- end }}
   rules:
     {{- range .Values.ingress.hosts }}
-    - host: {{ .host | quote }}
-      http:
-        paths:
-          {{- range .paths }}
-          - path: {{ .path }}
-            {{- with .pathType }}
-            pathType: {{ . }}
+      {{- $hostParts := split "." .host }}
+      {{- $subdomain := index $hostParts 0 }}
+      {{- $domain := join "." (slice $hostParts 1 (len $hostParts)) }}
+      {{- range $.Values.currency }}
+      - host: {{ printf "%s-%s.%s" $subdomain . $domain | quote }}
+        http:
+          paths:
+            {{- range .paths }}
+            - path: {{ .path }}
+              {{- with .pathType }}
+              pathType: {{ . }}
+              {{- end }}
+              backend:
+                service:
+                  name: {{ include "helm-chart.fullname" $ }}-{{ . }}
+                  port:
+                    number: {{ $.Values.service.adminPort }}
             {{- end }}
-            backend:
-              service:
-                name: {{ include "helm-chart.fullname" $ }}
-                port:
-                  number: {{ $.Values.service.adminPort }}
-          {{- end }}
+      {{- end }}
     {{- end }}
 {{- end }}
+{{- end }}
+
