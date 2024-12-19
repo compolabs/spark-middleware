@@ -149,7 +149,7 @@ impl MatcherWebSocket {
                     break;
                 }
             } else {
-                buy_index += 1;
+                sell_index += 1;
             }
         }
 
