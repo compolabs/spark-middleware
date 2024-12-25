@@ -5104,7 +5104,7 @@ dependencies = [
 [[package]]
 name = "pangea-client"
 version = "0.2.6"
-source = "git+https://github.com/nazgull08/pangea-client/#ab62a67ab30096b547558f94b677c90345115111"
+source = "git+https://github.com/PangeaFoundation/pangea-client?rev=fc513ec#fc513eccecc228829cb38f995cb1daa2dd411c3f"
 dependencies = [
  "async-trait",
  "base64 0.22.1",
