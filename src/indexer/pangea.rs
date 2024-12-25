@@ -1,5 +1,5 @@
-use ethers_core::types::H256;
 use fuels::accounts::provider::Provider;
+use fuels::types::Address;
 use log::{error, info};
 use pangea_client::{ChainId, Client};
 use pangea_client::{
@@ -39,7 +39,7 @@ async fn start_pangea_indexer(order_book: Arc<OrderBook>, matching_orders: Arc<M
     let client = create_pangea_client().await?;
 
     let contract_start_block: i64 = ev("CONTRACT_START_BLOCK")?.parse()?;
-    let contract_h256 = H256::from_str(&ev("CONTRACT_ID")?)?;
+    let contract_h256 = Address::from_str(&ev("CONTRACT_ID")?).unwrap();
 
     let mut last_processed_block =
         fetch_historical_data(&client, &order_book, &matching_orders,
@@ -86,7 +86,7 @@ async fn fetch_historical_data(
     order_book: &Arc<OrderBook>,
     matching_orders: &Arc<MatchingOrders>,
     contract_start_block: i64,
-    contract_h256: H256,
+    contract_h256: Address,
 ) -> Result<i64, Error> {
     let fuel_chain = match ev("CHAIN")?.as_str() { 
         "FUEL" => ChainId::FUEL,
@@ -153,7 +153,7 @@ async fn listen_for_new_deltas(
     order_book: &Arc<OrderBook>,
     matching_orders: &Arc<MatchingOrders>,
     mut last_processed_block: i64,
-    contract_h256: H256,
+    contract_h256: Address,
 ) -> Result<(), Error> {
     let mut retry_delay = Duration::from_secs(1);
     let reconnect_interval = Duration::from_secs(10*60); 
