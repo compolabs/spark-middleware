@@ -28,8 +28,11 @@ pub struct PangeaOrderEvent {
     pub limit_type: Option<String>,
 }
 
-pub async fn handle_order_event(order_book: Arc<OrderBook>, matching_orders: Arc<MatchingOrders>,
-    event: PangeaOrderEvent) {
+pub async fn handle_order_event(
+    order_book: Arc<OrderBook>,
+    matching_orders: Arc<MatchingOrders>,
+    event: PangeaOrderEvent,
+) {
     if let Some(event_type) = event.event_type.as_deref() {
         match event_type {
             "Open" => {

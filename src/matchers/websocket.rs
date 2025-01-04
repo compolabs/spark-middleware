@@ -14,16 +14,14 @@ use super::types::{MatcherConnectRequest, MatcherOrderUpdate};
 
 pub struct MatcherWebSocket {
     pub order_book: Arc<OrderBook>,
-    pub matching_orders: Arc<MatchingOrders>
+    pub matching_orders: Arc<MatchingOrders>,
 }
 
 impl MatcherWebSocket {
-    pub fn new(order_book: Arc<OrderBook>,
-        matching_orders: Arc<MatchingOrders>,
-    ) -> Self {
+    pub fn new(order_book: Arc<OrderBook>, matching_orders: Arc<MatchingOrders>) -> Self {
         Self {
             order_book,
-            matching_orders, 
+            matching_orders,
         }
     }
 
@@ -89,20 +87,23 @@ impl MatcherWebSocket {
         let mut available_orders = Vec::new();
 
         let matching_order_ids = self.matching_orders.get_all();
-        
-        let buy_orders = self.order_book.get_buy_orders()
+
+        let buy_orders = self
+            .order_book
+            .get_buy_orders()
             .values()
             .flat_map(|orders| orders.iter().cloned())
             .filter(|order| !matching_order_ids.contains(&order.id))
             .collect::<Vec<_>>();
 
-        let sell_orders = self.order_book.get_sell_orders()
+        let sell_orders = self
+            .order_book
+            .get_sell_orders()
             .values()
             .flat_map(|orders| orders.iter().cloned())
             .filter(|order| !matching_order_ids.contains(&order.id))
             .collect::<Vec<_>>();
 
-        
         let mut buy_queue = buy_orders;
         let mut sell_queue = sell_orders;
         buy_queue.sort_by_key(|o| (std::cmp::Reverse(o.price), o.timestamp));
@@ -153,7 +154,6 @@ impl MatcherWebSocket {
             }
         }
 
-        
         for order_id in new_matching_order_ids {
             self.matching_orders.add(&order_id);
             info!("----Order {} added to matching_orders", order_id);

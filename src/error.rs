@@ -40,7 +40,7 @@ pub enum Error {
     UnknownChainIdError,
 
     #[error("Pangea ws max retries exceeded")]
-    MaxRetriesExceeded
+    MaxRetriesExceeded,
 }
 
 #[derive(Error, Debug)]

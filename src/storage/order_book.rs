@@ -7,7 +7,7 @@ use crate::indexer::spot_order::{OrderType, SpotOrder};
 pub struct OrderBook {
     buy_orders: Arc<RwLock<BTreeMap<u128, Vec<SpotOrder>>>>,
     sell_orders: Arc<RwLock<BTreeMap<u128, Vec<SpotOrder>>>>,
-    is_synced: AtomicBool
+    is_synced: AtomicBool,
 }
 
 impl Default for OrderBook {

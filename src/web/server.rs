@@ -1,5 +1,5 @@
-use std::sync::Arc;
 use std::net::Ipv4Addr;
+use std::sync::Arc;
 
 use crate::storage::order_book::OrderBook;
 use crate::web::routes::{get_docs, get_routes};
