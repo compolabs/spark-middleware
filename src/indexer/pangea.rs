@@ -1,3 +1,4 @@
+use ethers_core::types::H256;
 use fuels::accounts::provider::Provider;
 use fuels::types::Address;
 use log::{error, info};
@@ -44,7 +45,8 @@ async fn start_pangea_indexer(
     let client = create_pangea_client().await?;
 
     let contract_start_block: i64 = ev("CONTRACT_START_BLOCK")?.parse()?;
-    let contract_h256 = Address::from_str(&ev("CONTRACT_ID")?).unwrap();
+    //let contract_h256 = Address::from_str(&ev("CONTRACT_ID")?).unwrap();
+    let contract_h256 = H256::from_str(&ev("CONTRACT_ID")?).unwrap();
 
     let mut last_processed_block = fetch_historical_data(
         &client,
@@ -104,7 +106,7 @@ async fn fetch_historical_data(
     order_book: &Arc<OrderBook>,
     matching_orders: &Arc<MatchingOrders>,
     contract_start_block: i64,
-    contract_h256: Address,
+    contract_h256: H256,
 ) -> Result<i64, Error> {
     let fuel_chain = match ev("CHAIN")?.as_str() {
         "FUEL" => ChainId::FUEL,
@@ -165,7 +167,7 @@ async fn listen_for_new_deltas(
     order_book: &Arc<OrderBook>,
     matching_orders: &Arc<MatchingOrders>,
     mut last_processed_block: i64,
-    contract_h256: Address,
+    contract_h256: H256
 ) -> Result<(), Error> {
     let mut retry_delay = Duration::from_secs(1);
 
@@ -207,7 +209,7 @@ async fn request_realtime(
     order_book: &Arc<OrderBook>,
     matching_orders: &Arc<MatchingOrders>,
     mut last_processed_block: i64,
-    contract_h256: Address,
+    contract_h256: H256,
 ) -> Result<(), Error> {
     let fuel_chain = match ev("CHAIN")?.as_str() {
         "FUEL" => ChainId::FUEL,
@@ -250,11 +252,11 @@ async fn request_realtime(
                     }
                 }
             }
-            return Ok(());
+            Ok(())
         }
         Err(e) => {
             error!("Failed to initiate stream: {}", e);
-            return Err(Error::from(e));
+            Err(Error::from(e))
         }
     }
 }

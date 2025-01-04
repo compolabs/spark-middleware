@@ -28,7 +28,7 @@ schemars = "0.8.0"
 serde = { version = "1.0.198", features = ["derive"] }
 serde_json = "1.0.116"
 spark-market-sdk = "0.6.5" 
-pangea-client = { git = "https://github.com/PangeaFoundation/pangea-client"}
+pangea-client = { git = "https://github.com/PangeaFoundation/pangea-client", rev = "fc513ec"}
 prometheus = "0.13.4"
 thiserror = "1.0.63"
 tokio = { version = "1.41.0", features = ["rt", "macros", "time"] }
