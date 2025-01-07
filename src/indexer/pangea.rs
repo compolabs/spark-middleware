@@ -1,6 +1,5 @@
 use ethers_core::types::H256;
 use fuels::accounts::provider::Provider;
-use fuels::types::Address;
 use log::{error, info};
 use pangea_client::{
     futures::StreamExt, provider::FuelProvider, query::Bound, requests::fuel::GetSparkOrderRequest,
@@ -11,7 +10,7 @@ use std::collections::HashSet;
 use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::time::sleep;
+use tokio::time::{sleep, timeout};
 
 use crate::config::env::ev;
 use crate::error::Error;
@@ -45,7 +44,6 @@ async fn start_pangea_indexer(
     let client = create_pangea_client().await?;
 
     let contract_start_block: i64 = ev("CONTRACT_START_BLOCK")?.parse()?;
-    //let contract_h256 = Address::from_str(&ev("CONTRACT_ID")?).unwrap();
     let contract_h256 = H256::from_str(&ev("CONTRACT_ID")?).unwrap();
 
     let mut last_processed_block = fetch_historical_data(
@@ -60,7 +58,6 @@ async fn start_pangea_indexer(
     if last_processed_block == 0 {
         last_processed_block = contract_start_block;
     }
-
     info!("Switching to listening for new orders (deltas)");
 
     listen_for_new_deltas(
@@ -112,6 +109,7 @@ async fn fetch_historical_data(
         "FUEL" => ChainId::FUEL,
         _ => ChainId::FUELTESTNET,
     };
+
     let mut last_processed_block = contract_start_block;
 
     let target_latest_block = get_latest_block(fuel_chain).await?;
@@ -129,7 +127,6 @@ async fn fetch_historical_data(
         .get_fuel_spark_orders_by_format(request, Format::JsonStream, false)
         .await
         .expect("Failed to get fuel spark orders batch");
-
     pangea_client::futures::pin_mut!(stream);
 
     while let Some(data) = stream.next().await {
@@ -148,7 +145,7 @@ async fn fetch_historical_data(
 
     last_processed_block = target_latest_block;
     info!(
-        "Processed events up to block {}. Moving to the next batch...",
+        "Processed events up to block {}. Moving to the next stage...",
         last_processed_block
     );
 
@@ -167,97 +164,75 @@ async fn listen_for_new_deltas(
     order_book: &Arc<OrderBook>,
     matching_orders: &Arc<MatchingOrders>,
     mut last_processed_block: i64,
-    contract_h256: H256
+    contract_h256: H256,
 ) -> Result<(), Error> {
     let mut retry_delay = Duration::from_secs(1);
 
+    let max_backoff = Duration::from_secs(60);
+
+    let inactivity_timeout = Duration::from_secs(30);
+
     loop {
-        match request_realtime(
-            client,
-            order_book,
-            matching_orders,
-            last_processed_block,
-            contract_h256,
-        )
-        .await
+        let fuel_chain = match ev("CHAIN")?.as_str() {
+            "FUEL" => ChainId::FUEL,
+            _ => ChainId::FUELTESTNET,
+        };
+
+        let request_deltas = GetSparkOrderRequest {
+            from_block: Bound::Exact(last_processed_block + 1),
+            to_block: Bound::Subscribe,
+            market_id__in: HashSet::from([contract_h256]),
+            chains: HashSet::from([fuel_chain]),
+            ..Default::default()
+        };
+
+        info!(
+            "Attempting to open stream from block: {} to Subscribe",
+            last_processed_block + 1
+        );
+
+        match client
+            .get_fuel_spark_orders_by_format(request_deltas, Format::JsonStream, true)
+            .await
         {
-            Ok(_) => {
-                info!("Successfully processed new orders.");
+            Ok(stream_deltas) => {
+                info!("Successfully connected to Pangea stream!");
+
                 retry_delay = Duration::from_secs(1);
-            }
-            Err(e) => {
-                ERRORS_TOTAL.inc();
-                error!("Error in request_realtime: {:?}", e);
-                sleep(retry_delay).await;
-                retry_delay = (retry_delay * 2).min(Duration::from_secs(60));
 
-                let fuel_chain = match ev("CHAIN")?.as_str() {
-                    "FUEL" => ChainId::FUEL,
-                    _ => ChainId::FUELTESTNET,
-                };
-                let latest_block = get_latest_block(fuel_chain).await?;
-                let buffer_blocks = 10;
-                last_processed_block = latest_block.saturating_sub(buffer_blocks);
-                info!("Updated last_processed_block to {}", last_processed_block);
-            }
-        }
-    }
-}
+                pangea_client::futures::pin_mut!(stream_deltas);
 
-async fn request_realtime(
-    client: &Client<WsProvider>,
-    order_book: &Arc<OrderBook>,
-    matching_orders: &Arc<MatchingOrders>,
-    mut last_processed_block: i64,
-    contract_h256: H256,
-) -> Result<(), Error> {
-    let fuel_chain = match ev("CHAIN")?.as_str() {
-        "FUEL" => ChainId::FUEL,
-        _ => ChainId::FUELTESTNET,
-    };
-
-    let request_deltas = GetSparkOrderRequest {
-        from_block: Bound::Exact(last_processed_block + 1),
-        to_block: Bound::Subscribe,
-        market_id__in: HashSet::from([contract_h256]),
-        chains: HashSet::from([fuel_chain]),
-        ..Default::default()
-    };
-
-    match client
-        .get_fuel_spark_orders_by_format(request_deltas, Format::JsonStream, true)
-        .await
-    {
-        Ok(stream_deltas) => {
-            pangea_client::futures::pin_mut!(stream_deltas);
-
-            while let Some(data_result) = stream_deltas.next().await {
-                match data_result {
-                    Ok(data) => {
-                        if let Err(e) = process_order_data(
-                            &data,
-                            order_book,
-                            matching_orders,
-                            &mut last_processed_block,
-                        )
-                        .await
-                        {
-                            panic!("Failed to process order data: {}", e);
+                while let Ok(Some(item)) = timeout(inactivity_timeout, stream_deltas.next()).await {
+                    match item {
+                        Ok(data) => {
+                            if let Err(e) = process_order_data(
+                                &data,
+                                order_book,
+                                matching_orders,
+                                &mut last_processed_block,
+                            )
+                            .await
+                            {
+                                error!("Failed to process order data: {}", e);
+                            }
                         }
-                    }
-                    Err(e) => {
-                        ERRORS_TOTAL.inc();
-                        error!("Error in the stream of new orders (deltas): {}", e);
-                        return Err(Error::from(e));
+                        Err(e) => {
+                            ERRORS_TOTAL.inc();
+                            error!("Error in the stream of new orders (deltas): {}", e);
+
+                            break;
+                        }
                     }
                 }
             }
-            Ok(())
+            Err(e) => {
+                error!("Failed to initiate stream: {}", e);
+            }
         }
-        Err(e) => {
-            error!("Failed to initiate stream: {}", e);
-            Err(Error::from(e))
-        }
+
+        sleep(retry_delay).await;
+
+        retry_delay = (retry_delay * 2).min(max_backoff);
     }
 }
 
@@ -270,11 +245,13 @@ async fn process_order_data(
     let timer = ORDER_PROCESSING_DURATION.start_timer();
     let data_str = String::from_utf8(data.to_vec())?;
     let order_event: PangeaOrderEvent = serde_json::from_str(&data_str)?;
+
     *last_processed_block = order_event.block_number;
     handle_order_event(order_book.clone(), matching_orders.clone(), order_event).await;
     timer.observe_duration();
     BUY_ORDERS_TOTAL.set(order_book.get_buy_orders().len() as i64);
     SELL_ORDERS_TOTAL.set(order_book.get_sell_orders().len() as i64);
+
     info!("BUY_ORDERS_TOTAL: {}", BUY_ORDERS_TOTAL.get());
     info!("SELL_ORDERS_TOTAL: {}", SELL_ORDERS_TOTAL.get());
     Ok(())
