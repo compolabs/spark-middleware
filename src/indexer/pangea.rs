@@ -170,7 +170,7 @@ async fn listen_for_new_deltas(
 
     let max_backoff = Duration::from_secs(60);
 
-    let inactivity_timeout = Duration::from_secs(30);
+    let inactivity_timeout = Duration::from_secs(3600);
 
     loop {
         let fuel_chain = match ev("CHAIN")?.as_str() {
