@@ -160,7 +160,7 @@ async fn fetch_historical_data(
 }
 
 async fn listen_for_new_deltas(
-    client: &Client<WsProvider>,
+    _client: &Client<WsProvider>,
     order_book: &Arc<OrderBook>,
     matching_orders: &Arc<MatchingOrders>,
     mut last_processed_block: i64,
@@ -170,65 +170,72 @@ async fn listen_for_new_deltas(
     let max_backoff = Duration::from_secs(60);
 
     loop {
-        let fuel_chain = match ev("CHAIN")?.as_str() {
-            "FUEL" => ChainId::FUEL,
-            _ => ChainId::FUELTESTNET,
-        };
+        match create_pangea_client().await {
+            Ok(client) => {
+                let fuel_chain = match ev("CHAIN")?.as_str() {
+                    "FUEL" => ChainId::FUEL,
+                    _ => ChainId::FUELTESTNET,
+                };
 
-        let request_deltas = GetSparkOrderRequest {
-            from_block: Bound::Exact(last_processed_block + 1),
-            to_block: Bound::Subscribe,
-            market_id__in: HashSet::from([contract_h256]),
-            chains: HashSet::from([fuel_chain]),
-            ..Default::default()
-        };
+                let request_deltas = GetSparkOrderRequest {
+                    from_block: Bound::Exact(last_processed_block + 1),
+                    to_block: Bound::Subscribe,
+                    market_id__in: HashSet::from([contract_h256]),
+                    chains: HashSet::from([fuel_chain]),
+                    ..Default::default()
+                };
 
-        info!(
-            "Attempting to open realtime stream from block: {}",
-            last_processed_block + 1
-        );
+                info!(
+                    "Attempting to open realtime stream from block: {}",
+                    last_processed_block + 1
+                );
 
-        match client
-            .get_fuel_spark_orders_by_format(request_deltas, Format::JsonStream, true)
-            .await
-        {
-            Ok(stream_deltas) => {
-                info!("Successfully connected to Pangea stream!");
+                match client
+                    .get_fuel_spark_orders_by_format(request_deltas, Format::JsonStream, true)
+                    .await
+                {
+                    Ok(stream_deltas) => {
+                        info!("Successfully connected to Pangea stream!");
+                        retry_delay = Duration::from_secs(1);
 
-                retry_delay = Duration::from_secs(1);
-
-                pangea_client::futures::pin_mut!(stream_deltas);
-
-                while let Some(data_result) = stream_deltas.next().await {
-                    match data_result {
-                        Ok(data) => {
-                            if let Err(e) = process_order_data(
-                                &data,
-                                order_book,
-                                matching_orders,
-                                &mut last_processed_block,
-                            )
-                            .await
-                            {
-                                error!("Failed to process order data: {}", e);
+                        pangea_client::futures::pin_mut!(stream_deltas);
+                        while let Some(data_result) = stream_deltas.next().await {
+                            match data_result {
+                                Ok(data) => {
+                                    if let Err(e) = process_order_data(
+                                        &data,
+                                        order_book,
+                                        matching_orders,
+                                        &mut last_processed_block,
+                                    )
+                                    .await
+                                    {
+                                        error!("Failed to process order data: {}", e);
+                                    }
+                                }
+                                Err(e) => {
+                                    ERRORS_TOTAL.inc();
+                                    error!(
+                                        "Stream error (block {}): {}",
+                                        last_processed_block + 1,
+                                        e
+                                    );
+                                    break;
+                                }
                             }
                         }
-                        Err(e) => {
-                            ERRORS_TOTAL.inc();
-                            error!("Error in the stream of new orders (deltas): {}", e);
-
-                            break;
-                        }
+                    }
+                    Err(e) => {
+                        error!("Failed to initiate stream: {}", e);
                     }
                 }
             }
             Err(e) => {
-                error!("Failed to initiate stream: {}", e);
+                error!("Failed to create Pangea client: {}", e);
             }
         }
 
         sleep(retry_delay).await;
-
         retry_delay = (retry_delay * 2).min(max_backoff);
     }
 }
