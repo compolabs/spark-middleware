@@ -123,6 +123,17 @@ impl MatcherWebSocket {
             if buy_order.price >= sell_order.price {
                 let trade_amount = std::cmp::min(buy_order.amount, sell_order.amount);
 
+                // Пропускаем "пыльные" ордера
+               if trade_amount <= 1_000_000 {
+                    if buy_queue[buy_index].amount <= 1_000_000 {
+                        buy_index += 1;
+                    }
+                    if sell_queue[sell_index].amount <= 1_000_000 {
+                        sell_index += 1;
+                    }
+                    continue;
+                }
+
                 let mut matched_buy_order = buy_order.clone();
                 matched_buy_order.amount = trade_amount;
 
