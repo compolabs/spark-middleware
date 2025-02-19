@@ -1,7 +1,7 @@
 replicaCount: 1
 
 ingress:
-  enabled: true
+  enabled: false
   hosts:
     - host: spark-middleware.production.sprk.fi
       paths:

@@ -1,8 +1,5 @@
 replicaCount: 1
 
-fullnameOverride: spark-middleware
-envFromSecret: spark-middleware
-
 image:
   repository: harbor.infra.sprk.fi/sprk/spark-middleware
   pullPolicy: IfNotPresent

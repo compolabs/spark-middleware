@@ -38,7 +38,7 @@ spec:
             {{- toYaml .Values.marketEnv | nindent 12}}
           envFrom:
             - secretRef:
-                name: {{ .Values.envFromSecret }}
+                name: {{ include "helm-chart.fullname" . }}
           ports:
             - name: http
               containerPort: {{ .Values.service.port }}
