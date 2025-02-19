@@ -1,6 +1,0 @@
-marketEnv:
-  - name: MARKET_ID
-    value: "0xdafe498b31f24ea5577055e86bf77e96bcba2c39a7ae47abaa819c303a45a352"
-
-vault:
-  name: middleware-usdcusdt
