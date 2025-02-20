@@ -15,7 +15,7 @@ pub fn rocket(port: u16, order_book: Arc<OrderBook>) -> Rocket<Build> {
     let config = Config {
         address: Ipv4Addr::new(0, 0, 0, 0).into(),
         port,
-        log_level: LogLevel::Critical,
+        log_level: LogLevel::Normal,
         ..Config::default()
     };
 

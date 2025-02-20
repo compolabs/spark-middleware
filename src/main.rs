@@ -110,7 +110,7 @@ async fn run_matcher_websocket_server(
         tokio::spawn(async move {
             let ws_stream = accept_async(stream)
                 .await
-                .expect("Error during WebSocket handshake");
+                .expect("Error during WebSocket handshake, port {matcher_ws_port}");
             matcher_websocket_clone.handle_connection(ws_stream).await;
         });
     }
