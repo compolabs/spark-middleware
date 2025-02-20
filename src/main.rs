@@ -14,6 +14,7 @@ use storage::order_book::OrderBook;
 use tokio::net::TcpListener;
 use tokio::signal;
 use tokio_tungstenite::accept_async;
+use tracing::{debug, info};
 use web::server::rocket;
 
 pub mod config;
@@ -42,12 +43,12 @@ lazy_static! {
 #[tokio::main]
 async fn main() -> Result<(), Error> {
     dotenv::dotenv().ok();
-    env_logger::init();
 
     let order_book = Arc::new(OrderBook::new());
     let matching_orders = Arc::new(MatchingOrders::new());
     let mut tasks = vec![];
 
+    info!("Initializing Pangea indexer...");
     initialize_pangea_indexer(
         &mut tasks,
         Arc::clone(&order_book),
@@ -56,9 +57,13 @@ async fn main() -> Result<(), Error> {
     .await?;
 
     let port = ev("SERVER_PORT")?.parse()?;
+    info!("Starting Rocket HTTP server on port {}", port);
     let rocket_task = tokio::spawn(run_rocket_server(port, Arc::clone(&order_book)));
+
     tasks.push(rocket_task);
     let matcher_ws_port = ev("MATCHERS_PORT")?.parse()?;
+
+    info!("Starting WebSocket server on port {}", matcher_ws_port);
     let matcher_websocket = Arc::new(MatcherWebSocket::new(
         order_book.clone(),
         matching_orders.clone(),
@@ -71,17 +76,17 @@ async fn main() -> Result<(), Error> {
 
     let ctrl_c_task = tokio::spawn(async {
         signal::ctrl_c().await.expect("failed to listen for event");
-        println!("Ctrl+C received!");
+        debug!("Ctrl+C received!");
     });
     tasks.push(ctrl_c_task);
 
     let shutdown_signal = signal::ctrl_c().map(|_| {
-        println!("Shutting down gracefully...");
+        info!("Shutting down gracefully...");
     });
 
     select(join_all(tasks).boxed(), shutdown_signal.boxed()).await;
 
-    println!("Application is shutting down.");
+    info!("Middleware stopped");
     Ok(())
 }
 

@@ -4,6 +4,7 @@ use std::sync::Arc;
 use crate::storage::order_book::OrderBook;
 use crate::web::routes::{get_docs, get_routes};
 use async_graphql::Schema;
+use rocket::config::LogLevel;
 use rocket::{Build, Config, Rocket};
 use rocket_okapi::swagger_ui::make_swagger_ui;
 
@@ -14,6 +15,7 @@ pub fn rocket(port: u16, order_book: Arc<OrderBook>) -> Rocket<Build> {
     let config = Config {
         address: Ipv4Addr::new(0, 0, 0, 0).into(),
         port,
+        log_level: LogLevel::Critical,
         ..Config::default()
     };
 

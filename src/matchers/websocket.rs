@@ -4,11 +4,12 @@ use crate::matchers::types::{MatcherRequest, MatcherResponse};
 use crate::storage::matching_orders::MatchingOrders;
 use crate::storage::order_book::OrderBook;
 use futures_util::{SinkExt, StreamExt};
-use log::{error, info};
 use std::sync::Arc;
 use tokio::net::TcpStream;
 use tokio_tungstenite::tungstenite::protocol::Message;
 use tokio_tungstenite::WebSocketStream;
+use tracing::debug;
+use tracing::{error, info};
 
 use super::types::{MatcherConnectRequest, MatcherOrderUpdate};
 
@@ -39,12 +40,13 @@ impl MatcherWebSocket {
                     }
                     Ok(MatcherRequest::OrderUpdates(order_updates)) => {
                         if let Some(uuid) = &matcher_uuid {
+                            debug!(uuid=%uuid, count=order_updates.len(), "Received order updates request");
                             self.handle_order_updates(order_updates, uuid.clone()).await;
                         }
                     }
                     Ok(MatcherRequest::Connect(MatcherConnectRequest { uuid })) => {
                         matcher_uuid = Some(uuid.clone());
-                        info!("Matcher {} connected", uuid);
+                        info!(uuid=%uuid, "Matcher connected");
                     }
                     _ => {
                         error!("Invalid message format received: {:?}", text);
@@ -63,15 +65,21 @@ impl MatcherWebSocket {
         let available_orders = self.get_available_orders(batch_size).await;
 
         let response = if available_orders.is_empty() {
+            debug!(uuid=%uuid, "No orders in the batch. Sending NoOrders response.");
             MatcherResponse::NoOrders
         } else {
+            debug!(
+                uuid=%uuid,
+                batch_size=available_orders.len(),
+                "Sending batch of orders to matcher"
+            );
             MatcherResponse::Batch(available_orders.clone())
         };
 
         let response_text = serde_json::to_string(&response).unwrap();
 
         if let Err(e) = write.send(Message::Text(response_text)).await {
-            error!("Failed to send response to matcher {}: {}", uuid, e);
+            error!(uuid=%uuid, "Failed to serialize response: {}", e);
 
             for order in available_orders {
                 self.matching_orders.remove(&order.id);
@@ -79,8 +87,8 @@ impl MatcherWebSocket {
         }
     }
 
-    async fn handle_order_updates(&self, order_updates: Vec<MatcherOrderUpdate>, _uuid: String) {
-        info!("Processing order updates: {:?}", order_updates);
+    async fn handle_order_updates(&self, order_updates: Vec<MatcherOrderUpdate>, uuid: String) {
+        debug!(uuid=%uuid, count=order_updates.len(), "Processing order updates");
     }
 
     async fn get_available_orders(&self, batch_size: usize) -> Vec<SpotOrder> {
@@ -122,9 +130,9 @@ impl MatcherWebSocket {
 
             if buy_order.price >= sell_order.price {
                 let trade_amount = std::cmp::min(buy_order.amount, sell_order.amount);
-
-                // Пропускаем "пыльные" ордера
-               if trade_amount <= 1_000_000 {
+                /*
+                if trade_amount <= 1_000_000 {
+                    debug!("Skipping dust orders: buy_id={} sell_id={}", buy_order.id, sell_order.id);
                     if buy_queue[buy_index].amount <= 1_000_000 {
                         buy_index += 1;
                     }
@@ -133,6 +141,7 @@ impl MatcherWebSocket {
                     }
                     continue;
                 }
+                */
 
                 let mut matched_buy_order = buy_order.clone();
                 matched_buy_order.amount = trade_amount;
@@ -167,7 +176,7 @@ impl MatcherWebSocket {
 
         for order_id in new_matching_order_ids {
             self.matching_orders.add(&order_id);
-            info!("----Order {} added to matching_orders", order_id);
+            debug!("Order {} added to matching_orders", order_id);
         }
 
         available_orders

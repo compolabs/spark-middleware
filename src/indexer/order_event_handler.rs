@@ -2,9 +2,18 @@ use crate::indexer::spot_order::{LimitType, OrderStatus, OrderType, SpotOrder};
 use crate::storage::matching_orders::MatchingOrders;
 use crate::storage::order_book::OrderBook;
 use chrono::Utc;
-use log::{error, info};
+use prometheus::{register_int_counter, IntCounter};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
+use tracing::{debug, error, warn};
+
+lazy_static::lazy_static! {
+    static ref PROCESSED_ORDERS_TOTAL: IntCounter = register_int_counter!(
+        "processed_orders_total",
+        "Total number of processed orders"
+    )
+    .unwrap();
+}
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct PangeaOrderEvent {
@@ -38,12 +47,15 @@ pub async fn handle_order_event(
             "Open" => {
                 if let Some(order) = create_new_order_from_event(&event) {
                     order_book.add_order(order);
-                    info!("Added new order with id: {}", event.order_id);
+                    debug!("🟢 New order added (id: {})", event.order_id);
                 }
             }
             "Trade" => {
                 matching_orders.remove(&event.order_id);
-                info!("Order {} removed from matching_orders", &event.order_id);
+                debug!(
+                    "🔄 Order {} removed from matching_orders (Trade event)",
+                    &event.order_id
+                );
                 if let Some(match_size) = event.amount {
                     let o_type = event.order_type_to_enum();
                     let l_type = event.limit_type_to_enum();
@@ -52,15 +64,18 @@ pub async fn handle_order_event(
             }
             "Cancel" => {
                 matching_orders.remove(&event.order_id);
-                info!("Order {} removed from matching_orders", &event.order_id);
+                debug!(
+                    "🔄 Order {} removed from matching_orders (Cancel event)",
+                    &event.order_id
+                );
                 order_book.remove_order(&event.order_id, event.order_type_to_enum());
-                info!(
+                debug!(
                     "Removed order with id: {} due to Cancel event",
                     event.order_id
                 );
             }
             _ => {
-                error!("Unknown event type: {}", event_type);
+                error!("❌ Received order event without type: {:?}", event);
             }
         }
     }
@@ -90,6 +105,7 @@ fn create_new_order_from_event(event: &PangeaOrderEvent) -> Option<SpotOrder> {
             status: Some(OrderStatus::New),
         })
     } else {
+        warn!("Missing required fields in event: {:?}", event);
         None
     }
 }
@@ -110,14 +126,14 @@ pub fn process_trade(
                         order.status = Some(OrderStatus::PartiallyMatched);
                         order_book.update_order(order.clone());
 
-                        info!(
+                        debug!(
                             "Updated order with id: {} - partially matched, remaining amount: {}",
                             order_id, order.amount
                         );
                     } else {
                         order.status = Some(OrderStatus::Matched);
                         order_book.remove_order(order_id, Some(order_type));
-                        info!("Removed order with id: {} - fully matched", order_id);
+                        debug!("Removed order with id: {} - fully matched", order_id);
                     }
                 } else {
                     error!("Order with id: {} not found for trade event", order_id);
@@ -125,7 +141,7 @@ pub fn process_trade(
             }
             _ => {
                 order_book.remove_order(order_id, Some(order_type));
-                info!("Removed order with id: {} - FOK or IOC matched", order_id);
+                debug!("Removed order with id: {} - FOK or IOC matched", order_id);
             }
         },
         _ => {

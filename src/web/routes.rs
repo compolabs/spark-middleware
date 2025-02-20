@@ -4,7 +4,6 @@ use std::sync::Arc;
 use async_graphql::http::{playground_source, GraphQLPlaygroundConfig};
 use async_graphql::{EmptyMutation, EmptySubscription, Schema};
 use async_graphql_rocket::{GraphQLRequest, GraphQLResponse};
-use log::warn;
 use prometheus::{Encoder, TextEncoder};
 use rocket::http::Status;
 use rocket::request::FromParam;
@@ -14,6 +13,7 @@ use rocket::{get, routes, Route, State};
 use rocket_okapi::swagger_ui::SwaggerUIConfig;
 use rocket_okapi::{openapi, openapi_get_routes, JsonSchema};
 use serde::{Deserialize, Serialize};
+use tracing::warn;
 
 use crate::indexer::spot_order::{OrderType, SpotOrder};
 use crate::storage::order_book::OrderBook;

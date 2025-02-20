@@ -1,6 +1,5 @@
 use ethers_core::types::H256;
 use fuels::accounts::provider::Provider;
-use log::{error, info};
 use pangea_client::{
     futures::StreamExt, provider::FuelProvider, query::Bound, requests::fuel::GetSparkOrderRequest,
     ClientBuilder, Format, WsProvider,
@@ -11,6 +10,7 @@ use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::time::sleep;
+use tracing::{error, info, warn};
 
 use crate::config::env::ev;
 use crate::error::Error;
@@ -29,7 +29,7 @@ pub async fn initialize_pangea_indexer(
 ) -> Result<(), Error> {
     let ws_task_pangea = tokio::spawn(async move {
         if let Err(e) = start_pangea_indexer(order_book, matching_orders).await {
-            eprintln!("Pangea error: {}", e);
+            error!("Pangea error: {}", e);
         }
     });
 
@@ -46,6 +46,8 @@ async fn start_pangea_indexer(
     let contract_start_block: i64 = ev("CONTRACT_START_BLOCK")?.parse()?;
     let contract_h256 = H256::from_str(&ev("CONTRACT_ID")?).unwrap();
 
+    info!("🔄 Starting sync from block {}...", contract_start_block);
+
     let mut last_processed_block = fetch_historical_data(
         &client,
         &order_book,
@@ -59,7 +61,10 @@ async fn start_pangea_indexer(
         last_processed_block = contract_start_block;
     }
 
-    info!("Switching to listening for new orders (deltas)");
+    info!(
+        "✅ Sync complete. Switching to realtime indexing from block {}",
+        last_processed_block
+    );
 
     listen_for_new_deltas(
         &client,
@@ -82,7 +87,7 @@ async fn create_pangea_client() -> Result<Client<WsProvider>, Error> {
         .build::<WsProvider>()
         .await?;
 
-    info!("Pangea ws client created and connected.");
+    info!("✅ Connected to Pangea WebSocket at {}", url);
     Ok(client)
 }
 
@@ -113,7 +118,10 @@ async fn fetch_historical_data(
     let mut last_processed_block = contract_start_block;
 
     let target_latest_block = get_latest_block(fuel_chain).await?;
-    info!("Target last block for processing: {}", target_latest_block);
+    info!(
+        "📌 Syncing historical data from block {} to {}...",
+        contract_start_block, target_latest_block
+    );
 
     let request = GetSparkOrderRequest {
         from_block: Bound::Exact(last_processed_block),
@@ -144,16 +152,15 @@ async fn fetch_historical_data(
     }
 
     last_processed_block = target_latest_block;
-    info!(
-        "Processed events up to block {}. Moving to the next batch...",
-        last_processed_block
-    );
 
+    info!(
+        "✅ Historical sync complete at block {}",
+        target_latest_block
+    );
     order_book.mark_as_synced();
     SYNC_STATUS.set(1);
     BUY_ORDERS_TOTAL.set(order_book.get_buy_orders().len() as i64);
     SELL_ORDERS_TOTAL.set(order_book.get_sell_orders().len() as i64);
-    info!("=======");
     info!("BUY_ORDERS_TOTAL: {}", BUY_ORDERS_TOTAL.get());
     info!("SELL_ORDERS_TOTAL: {}", SELL_ORDERS_TOTAL.get());
     Ok(last_processed_block)
@@ -172,6 +179,10 @@ async fn listen_for_new_deltas(
     loop {
         match create_pangea_client().await {
             Ok(client) => {
+                info!(
+                    "🔄 Listening for new orders from block {}",
+                    last_processed_block + 1
+                );
                 let fuel_chain = match ev("CHAIN")?.as_str() {
                     "FUEL" => ChainId::FUEL,
                     _ => ChainId::FUELTESTNET,
@@ -184,12 +195,6 @@ async fn listen_for_new_deltas(
                     chains: HashSet::from([fuel_chain]),
                     ..Default::default()
                 };
-
-                info!(
-                    "Attempting to open realtime stream from block: {}",
-                    last_processed_block + 1
-                );
-
                 match client
                     .get_fuel_spark_orders_by_format(request_deltas, Format::JsonStream, true)
                     .await
@@ -210,7 +215,7 @@ async fn listen_for_new_deltas(
                                     )
                                     .await
                                     {
-                                        error!("Failed to process order data: {}", e);
+                                        warn!("Failed to process order data: {}", e);
                                     }
                                 }
                                 Err(e) => {
