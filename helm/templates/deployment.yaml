@@ -35,11 +35,10 @@ spec:
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           env:
-            {{- toYaml .Values.env | nindent 12}}
             {{- toYaml .Values.marketEnv | nindent 12}}
           envFrom:
             - secretRef:
-                name: {{ .Values.envFromSecret }}
+                name: {{ include "helm-chart.fullname" . }}
           ports:
             - name: http
               containerPort: {{ .Values.service.port }}

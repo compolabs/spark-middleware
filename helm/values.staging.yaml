@@ -1,5 +1,5 @@
 ingress:
-  enabled: true
+  enabled: false
   hosts:
     - host: spark-middleware.staging.sprk.fi
       paths:
