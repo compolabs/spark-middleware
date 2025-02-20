@@ -21,9 +21,9 @@ in pkgs.stdenv.mkDerivation rec {
   shellHook = ''
     export OPENSSL_DIR="${merged-openssl}"
 
-    export RUST_LOG=info
-    FILE_LOG_LEVEL="info"
-    CONSOLE_LOG_LEVEL="info"
+    export RUST_LOG=debug
+    FILE_LOG_LEVEL="debug"
+    CONSOLE_LOG_LEVEL="debug"
     echo "RUST_LOG is set to $RUST_LOG"
 
     echo "middleware environment is ready."
