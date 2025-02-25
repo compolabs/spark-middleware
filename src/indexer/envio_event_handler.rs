@@ -1,0 +1,150 @@
+use crate::indexer::spot_order::{LimitType, OrderStatus, OrderType, SpotOrder};
+use crate::storage::matching_orders::MatchingOrders;
+use crate::storage::order_book::OrderBook;
+use chrono::Utc;
+use serde::{Deserialize, Serialize};
+use std::sync::Arc;
+use tracing::{debug, error, info, warn};
+
+#[derive(Debug, Deserialize, Serialize)]
+pub struct EnvioOrderEvent {
+    pub event_type: String,
+    pub id: String,
+    pub order_id: Option<String>,
+    pub user: Option<String>,
+    pub asset: Option<String>,
+    pub amount: Option<u128>,
+    pub price: Option<u128>,
+    pub order_type: Option<String>,
+    pub limit_type: Option<String>,
+    pub timestamp: Option<String>,
+}
+
+pub async fn handle_envio_event(
+    order_book: Arc<OrderBook>,
+    matching_orders: Arc<MatchingOrders>,
+    event: EnvioOrderEvent,
+) {
+    match event.event_type.as_str() {
+        "OpenOrderEvent" => {
+            if let Some(order) = create_new_order_from_event(&event) {
+                order_book.add_order(order);
+                debug!("🟢 New order added (id: {})", event.id);
+            }
+        }
+        "TradeOrderEvent" => {
+            if let Some(order_id) = &event.order_id {
+                matching_orders.remove(order_id);
+                debug!("🔄 Order {} removed from matching_orders (Trade event)", order_id);
+                if let Some(match_size) = event.amount {
+                    let o_type = event.order_type_to_enum();
+                    let l_type = event.limit_type_to_enum();
+                    process_trade(&order_book, order_id, match_size, o_type, l_type);
+                }
+            }
+        }
+        "CancelOrderEvent" => {
+            if let Some(order_id) = &event.order_id {
+                matching_orders.remove(order_id);
+                order_book.remove_order(order_id, event.order_type_to_enum());
+                debug!("Removed order with id: {} due to Cancel event", order_id);
+            }
+        }
+        _ => {
+            error!("❌ Unknown event type: {:?}", event);
+        }
+    }
+}
+
+fn create_new_order_from_event(event: &EnvioOrderEvent) -> Option<SpotOrder> {
+    if let (Some(price), Some(amount), Some(order_type), Some(limit_type), Some(user)) = (
+        event.price,
+        event.amount,
+        event.order_type.as_deref(),
+        event.limit_type.as_deref(),
+        &event.user,
+    ) {
+        let order_type_enum = match order_type {
+            "Buy" => OrderType::Buy,
+            "Sell" => OrderType::Sell,
+            _ => return None,
+        };
+        let limit_type_enum = match limit_type {
+            "GTC" => Some(LimitType::GTC),
+            "IOC" => Some(LimitType::IOC),
+            "FOK" => Some(LimitType::FOK),
+            "MKT" => Some(LimitType::MKT),
+            _ => None,
+        };
+
+        Some(SpotOrder {
+            id: event.id.clone(),
+            user: user.clone(),
+            asset: event.asset.clone().unwrap_or_default(),
+            amount,
+            price,
+            timestamp: Utc::now().timestamp_millis() as u64,
+            order_type: order_type_enum,
+            limit_type: limit_type_enum,
+            status: Some(OrderStatus::New),
+        })
+    } else {
+        warn!("Missing required fields in event: {:?}", event);
+        None
+    }
+}
+
+fn process_trade(
+    order_book: &OrderBook,
+    order_id: &str,
+    trade_amount: u128,
+    order_type: Option<OrderType>,
+    limit_type: Option<LimitType>,
+) {
+    if let (Some(order_type), Some(limit_type)) = (order_type, limit_type) {
+        match limit_type {
+            LimitType::GTC => {
+                if let Some(mut order) = order_book.get_order(order_id, order_type) {
+                    if order.amount > trade_amount {
+                        order.amount -= trade_amount;
+                        order.status = Some(OrderStatus::PartiallyMatched);
+                        order_book.update_order(order.clone());
+                        debug!("Updated order with id: {} - partially matched, remaining amount: {}", order_id, order.amount);
+                    } else {
+                        order.status = Some(OrderStatus::Matched);
+                        order_book.remove_order(order_id, Some(order_type));
+                        debug!("Removed order with id: {} - fully matched", order_id);
+                    }
+                } else {
+                    error!("Order with id: {} not found for trade event", order_id);
+                }
+            }
+            _ => {
+                order_book.remove_order(order_id, Some(order_type));
+                debug!("Removed order with id: {} - FOK or IOC matched", order_id);
+            }
+        }
+    } else {
+        error!("Order type or limit type is None for order_id: {}. Cannot process trade event.", order_id);
+    }
+}
+
+impl EnvioOrderEvent {
+    pub fn order_type_to_enum(&self) -> Option<OrderType> {
+        self.order_type.as_deref().and_then(|order_type| match order_type {
+            "Buy" => Some(OrderType::Buy),
+            "Sell" => Some(OrderType::Sell),
+            _ => None,
+        })
+    }
+
+    pub fn limit_type_to_enum(&self) -> Option<LimitType> {
+        self.limit_type.as_deref().and_then(|limit_type| match limit_type {
+            "FOK" => Some(LimitType::FOK),
+            "IOC" => Some(LimitType::IOC),
+            "GTC" => Some(LimitType::GTC),
+            "MKT" => Some(LimitType::MKT),
+            _ => None,
+        })
+    }
+}

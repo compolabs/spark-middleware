@@ -1,8 +1,7 @@
 use crate::config::env::ev;
 use crate::indexer::spot_order::SpotOrder;
 use crate::matchers::types::{MatcherRequest, MatcherResponse};
-use crate::storage::matching_orders::MatchingOrders;
-use crate::storage::order_book::OrderBook;
+use crate::storage::order_storage::OrderStorage;
 use futures_util::{SinkExt, StreamExt};
 use std::sync::Arc;
 use tokio::net::TcpStream;
@@ -14,16 +13,12 @@ use tracing::{error, info};
 use super::types::{MatcherConnectRequest, MatcherOrderUpdate};
 
 pub struct MatcherWebSocket {
-    pub order_book: Arc<OrderBook>,
-    pub matching_orders: Arc<MatchingOrders>,
+    pub storage: Arc<OrderStorage>,
 }
 
 impl MatcherWebSocket {
-    pub fn new(order_book: Arc<OrderBook>, matching_orders: Arc<MatchingOrders>) -> Self {
-        Self {
-            order_book,
-            matching_orders,
-        }
+    pub fn new(storage: Arc<OrderStorage>) -> Self {
+        Self {storage}
     }
 
     pub async fn handle_connection(self: Arc<Self>, ws_stream: WebSocketStream<TcpStream>) {
@@ -40,7 +35,11 @@ impl MatcherWebSocket {
                     }
                     Ok(MatcherRequest::OrderUpdates(order_updates)) => {
                         if let Some(uuid) = &matcher_uuid {
-                            debug!(uuid=%uuid, count=order_updates.len(), "Received order updates request");
+                            debug!(
+                                uuid=%uuid,
+                                count=order_updates.len(),
+                                "Received order updates request"
+                            );
                             self.handle_order_updates(order_updates, uuid.clone()).await;
                         }
                     }
@@ -61,7 +60,11 @@ impl MatcherWebSocket {
         write: &mut futures_util::stream::SplitSink<WebSocketStream<TcpStream>, Message>,
         uuid: String,
     ) {
-        let batch_size = ev("BATCH_SIZE").unwrap().parse().unwrap();
+        let batch_size = ev("BATCH_SIZE")
+            .unwrap_or_else(|_| "25".into()) 
+            .parse()
+            .unwrap_or(10);
+
         let available_orders = self.get_available_orders(batch_size).await;
 
         let response = if available_orders.is_empty() {
@@ -77,12 +80,10 @@ impl MatcherWebSocket {
         };
 
         let response_text = serde_json::to_string(&response).unwrap();
-
-        if let Err(e) = write.send(Message::Text(response_text)).await {
+        if let Err(e) = write.send(Message::Text(response_text.into())).await {
             error!(uuid=%uuid, "Failed to serialize response: {}", e);
-
             for order in available_orders {
-                self.matching_orders.remove(&order.id);
+                self.storage.matching_orders.remove(&order.id);
             }
         }
     }
@@ -94,9 +95,10 @@ impl MatcherWebSocket {
     async fn get_available_orders(&self, batch_size: usize) -> Vec<SpotOrder> {
         let mut available_orders = Vec::new();
 
-        let matching_order_ids = self.matching_orders.get_all();
+        let matching_order_ids = self.storage.matching_orders.get_all();
 
         let buy_orders = self
+            .storage
             .order_book
             .get_buy_orders()
             .values()
@@ -105,6 +107,7 @@ impl MatcherWebSocket {
             .collect::<Vec<_>>();
 
         let sell_orders = self
+            .storage
             .order_book
             .get_sell_orders()
             .values()
@@ -119,7 +122,7 @@ impl MatcherWebSocket {
 
         let mut buy_index = 0;
         let mut sell_index = 0;
-        let mut new_matching_order_ids = Vec::new();
+        let mut new_matching_order_ids : Vec<String> = Vec::new();
 
         while buy_index < buy_queue.len()
             && sell_index < sell_queue.len()
@@ -130,18 +133,6 @@ impl MatcherWebSocket {
 
             if buy_order.price >= sell_order.price {
                 let trade_amount = std::cmp::min(buy_order.amount, sell_order.amount);
-                /*
-                if trade_amount <= 1_000_000 {
-                    debug!("Skipping dust orders: buy_id={} sell_id={}", buy_order.id, sell_order.id);
-                    if buy_queue[buy_index].amount <= 1_000_000 {
-                        buy_index += 1;
-                    }
-                    if sell_queue[sell_index].amount <= 1_000_000 {
-                        sell_index += 1;
-                    }
-                    continue;
-                }
-                */
 
                 let mut matched_buy_order = buy_order.clone();
                 matched_buy_order.amount = trade_amount;
@@ -175,7 +166,7 @@ impl MatcherWebSocket {
         }
 
         for order_id in new_matching_order_ids {
-            self.matching_orders.add(&order_id);
+            self.storage.matching_orders.add(&order_id);
             debug!("Order {} added to matching_orders", order_id);
         }
 

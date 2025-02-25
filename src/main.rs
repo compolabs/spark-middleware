@@ -1,16 +1,14 @@
 use config::env::ev;
 use error::Error;
-use futures_util::future::FutureExt;
-use futures_util::future::{join_all, select};
-use indexer::pangea::initialize_pangea_indexer;
+use futures_util::future::{join_all, select, FutureExt};
+use indexer::{envio::EnvioIndexer, indexer::Indexer, pangea::PangeaIndexer};
 use lazy_static::lazy_static;
 use matchers::websocket::MatcherWebSocket;
 use prometheus::{
     register_histogram, register_int_counter, register_int_gauge, Histogram, IntCounter, IntGauge,
 };
 use std::sync::Arc;
-use storage::matching_orders::MatchingOrders;
-use storage::order_book::OrderBook;
+use storage::order_storage::OrderStorage;
 use tokio::net::TcpListener;
 use tokio::signal;
 use tokio_tungstenite::accept_async;
@@ -44,30 +42,33 @@ lazy_static! {
 async fn main() -> Result<(), Error> {
     dotenv::dotenv().ok();
 
-    let order_book = Arc::new(OrderBook::new());
-    let matching_orders = Arc::new(MatchingOrders::new());
+    tracing_subscriber::fmt()
+        .with_target(false)
+        .with_level(true)
+        .init();
+    info!("Logger initialized");
+
+    let storage = Arc::new(OrderStorage::new());
     let mut tasks = vec![];
 
-    info!("Initializing Pangea indexer...");
-    initialize_pangea_indexer(
-        &mut tasks,
-        Arc::clone(&order_book),
-        Arc::clone(&matching_orders),
-    )
-    .await?;
+    let indexer_type = ev("INDEXER").unwrap_or_else(|_| "PANGEA".to_string()).to_uppercase();
+    info!("Selected indexer: {}", indexer_type);
+
+    let indexer: Arc<dyn Indexer + Send + Sync> = match indexer_type.as_str() {
+        "ENVIO" => Arc::new(EnvioIndexer::new(Arc::clone(&storage))),
+        "PANGEA" | _ => Arc::new(PangeaIndexer::new(Arc::clone(&storage))),
+    };
+
+    indexer.initialize(&mut tasks).await?;
 
     let port = ev("SERVER_PORT")?.parse()?;
     info!("Starting Rocket HTTP server on port {}", port);
-    let rocket_task = tokio::spawn(run_rocket_server(port, Arc::clone(&order_book)));
-
+    let rocket_task = tokio::spawn(run_rocket_server(port, Arc::clone(&storage.order_book)));
     tasks.push(rocket_task);
-    let matcher_ws_port = ev("MATCHERS_PORT")?.parse()?;
 
+    let matcher_ws_port = ev("MATCHERS_PORT")?.parse()?;
     info!("Starting WebSocket server on port {}", matcher_ws_port);
-    let matcher_websocket = Arc::new(MatcherWebSocket::new(
-        order_book.clone(),
-        matching_orders.clone(),
-    ));
+    let matcher_websocket = Arc::new(MatcherWebSocket::new(Arc::clone(&storage)));
     let matcher_ws_task = tokio::spawn(run_matcher_websocket_server(
         matcher_websocket.clone(),
         matcher_ws_port,
@@ -90,7 +91,7 @@ async fn main() -> Result<(), Error> {
     Ok(())
 }
 
-async fn run_rocket_server(port: u16, order_book: Arc<OrderBook>) {
+async fn run_rocket_server(port: u16, order_book: Arc<storage::order_book::OrderBook>) {
     let rocket = rocket(port, order_book);
     let _ = rocket.launch().await;
 }
@@ -110,7 +111,7 @@ async fn run_matcher_websocket_server(
         tokio::spawn(async move {
             let ws_stream = accept_async(stream)
                 .await
-                .expect("Error during WebSocket handshake, port {matcher_ws_port}");
+                .expect("Error during WebSocket handshake");
             matcher_websocket_clone.handle_connection(ws_stream).await;
         });
     }

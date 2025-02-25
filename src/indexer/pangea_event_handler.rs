@@ -5,7 +5,7 @@ use chrono::Utc;
 use prometheus::{register_int_counter, IntCounter};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
-use tracing::{debug, error, warn};
+use tracing::{debug, error, info, warn};
 
 lazy_static::lazy_static! {
     static ref PROCESSED_ORDERS_TOTAL: IntCounter = register_int_counter!(
@@ -82,16 +82,25 @@ pub async fn handle_order_event(
 }
 
 fn create_new_order_from_event(event: &PangeaOrderEvent) -> Option<SpotOrder> {
-    if let (Some(price), Some(amount), Some(order_type), Some(user)) = (
+    info!("creating new order: \n======================== {:?}\n=======================", event);
+    if let (Some(price), Some(amount), Some(order_type), Some(limit_type),  Some(user)) = (
         event.price,
         event.amount,
         event.order_type.as_deref(),
+        event.limit_type.as_deref(),
         &event.user,
     ) {
         let order_type_enum = match order_type {
             "Buy" => OrderType::Buy,
             "Sell" => OrderType::Sell,
             _ => return None,
+        };
+        let limit_type_enum = match  limit_type {
+            "GTC" => Some(LimitType::GTC),
+            "IOC" => Some(LimitType::IOC),
+            "FOK" => Some(LimitType::FOK),
+            "MKT" => Some(LimitType::MKT),
+            _ => None,
         };
 
         Some(SpotOrder {
@@ -102,6 +111,7 @@ fn create_new_order_from_event(event: &PangeaOrderEvent) -> Option<SpotOrder> {
             price,
             timestamp: Utc::now().timestamp_millis() as u64,
             order_type: order_type_enum,
+            limit_type: limit_type_enum,
             status: Some(OrderStatus::New),
         })
     } else {
@@ -171,6 +181,7 @@ impl PangeaOrderEvent {
                 "FOK" => Some(LimitType::FOK),
                 "IOC" => Some(LimitType::IOC),
                 "GTC" => Some(LimitType::GTC),
+                "MKT" => Some(LimitType::MKT),
                 _ => None,
             })
     }

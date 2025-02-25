@@ -36,6 +36,12 @@ pub enum Error {
     #[error("Parsing error: {0}")]
     ParsingError(#[from] ParsingError),
 
+    #[error("Graphql envio Error: {0}")]
+    GraphqlError(String),
+
+    #[error("DEBUG Graphql envio Error: {0}")]
+    Other(String),
+
     #[error("Unknown chain id")]
     UnknownChainIdError,
 

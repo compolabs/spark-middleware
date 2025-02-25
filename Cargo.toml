@@ -6,19 +6,25 @@ edition = "2021"
 
 [dependencies]
 anyhow = "1.0.92"
-async-tungstenite = { version = "0.28", features = ["tokio-runtime"] }
 async-graphql = "7.0.9"
 async-graphql-rocket = "7.0.9"
+async-trait = "0.1.86"
+async-tungstenite = { version = "0.28", features = ["tokio-runtime"] }
 chrono = { version = "0.4.38", features = ["serde"] }
 ctrlc = "3.4"
 dotenv = "0.15.0"
-fuels = { version = "0.66.10", features = ["fuel-core-lib"] }
-fuel-crypto = "0.58.2"
+ethers-core = "2.0.14"
 fuel-core-types = "0.40.2"
+fuel-crypto = "0.58.2"
+fuels = { version = "0.66.10", features = ["fuel-core-lib"] }
 futures-util = "0.3"
+graphql_client = "0.14.0"
 hex = "0.4.3"
 lazy_static = "1.5.0"
-ethers-core = "2.0.14"
+pangea-client = "0.3.5" 
+#pangea-client = { git = "https://github.com/nazgull08/pangea-client.git", branch = "master" }
+prometheus = "0.13.4"
+reqwest = "0.12.12"
 rocket = { version = "0.5.0-rc.3", features = ["json"] }
 rocket_okapi = { version = "0.8.0-rc.2", features = ["swagger", "rapidoc"] }
 rustc-hex = "2.1.0"
@@ -26,12 +32,11 @@ schemars = "0.8.0"
 serde = { version = "1.0.198", features = ["derive"] }
 serde_json = "1.0.116"
 spark-market-sdk = "0.6.5" 
-pangea-client = "0.3.2" 
-prometheus = "0.13.4"
 thiserror = "1.0.63"
 tokio = { version = "1.41.0", features = ["rt", "macros", "time"] }
-tokio-tungstenite = "0.24.0"
+tokio-tungstenite = { version = "0.26.1", features = ["native-tls"] }
 toml = "0.5"
 tracing = "0.1.41"
+tracing-subscriber = "0.3.19"
 url = "2.3.1"
 uuid = { version = "1.0", features = ["v4"] }
