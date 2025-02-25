@@ -3,6 +3,7 @@ use crate::storage::matching_orders::MatchingOrders;
 use crate::storage::order_book::OrderBook;
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use std::sync::Arc;
 use tracing::{debug, error, info, warn};
 
@@ -28,8 +29,23 @@ pub async fn handle_envio_event(
     match event.event_type.as_str() {
         "OpenOrderEvent" => {
             if let Some(order) = create_new_order_from_event(&event) {
-                order_book.add_order(order);
-                debug!("🟢 New order added (id: {})", event.id);
+                if let Some(existing_order) = order_book.get_order(&order.id, order.order_type) {
+                    // Ордер уже существует → обновляем данные
+                    debug!("🔄 Updating existing order (id: {})", order.id);
+
+                    let mut updated_order = existing_order.clone();
+                    updated_order.amount = order.amount;
+                    updated_order.price = order.price;
+                    updated_order.timestamp = order.timestamp;
+                    updated_order.limit_type = order.limit_type;
+                    updated_order.status = order.status;
+
+                    order_book.update_order(updated_order);
+                } else {
+                    // Ордер новый → добавляем
+                    debug!("🟢 New order added (id: {})", order.id);
+                    order_book.add_order(order);
+                }
             }
         }
         "TradeOrderEvent" => {
@@ -47,7 +63,7 @@ pub async fn handle_envio_event(
             if let Some(order_id) = &event.order_id {
                 matching_orders.remove(order_id);
                 order_book.remove_order(order_id, event.order_type_to_enum());
-                debug!("Removed order with id: {} due to Cancel event", order_id);
+                debug!("❌ Removed order with id: {} due to Cancel event", order_id);
             }
         }
         _ => {
@@ -64,6 +80,14 @@ fn create_new_order_from_event(event: &EnvioOrderEvent) -> Option<SpotOrder> {
         event.limit_type.as_deref(),
         &event.user,
     ) {
+        let real_order_id = match &event.order_id {
+            Some(oid) => oid.clone(),
+            None => {
+                warn!("No 'order_id' in event, fallback to 'id'. Event: {:?}", event);
+                event.id.clone()
+            }
+        };
+        
         let order_type_enum = match order_type {
             "Buy" => OrderType::Buy,
             "Sell" => OrderType::Sell,
@@ -78,7 +102,8 @@ fn create_new_order_from_event(event: &EnvioOrderEvent) -> Option<SpotOrder> {
         };
 
         Some(SpotOrder {
-            id: event.id.clone(),
+            // Здесь используем orderId
+            id: real_order_id,
             user: user.clone(),
             asset: event.asset.clone().unwrap_or_default(),
             amount,
@@ -147,4 +172,21 @@ impl EnvioOrderEvent {
             _ => None,
         })
     }
+}
+
+
+
+pub fn parse_envio_event(json: &Value, event_type: &str) -> Option<EnvioOrderEvent> {
+    Some(EnvioOrderEvent {
+        event_type: event_type.to_string(),
+        id: json.get("id")?.as_str()?.to_string(),
+        order_id: json.get("orderId").and_then(|v| v.as_str().map(|s| s.to_string())),
+        user: json.get("user").and_then(|v| v.as_str().map(|s| s.to_string())),
+        asset: json.get("asset").and_then(|v| v.as_str().map(|s| s.to_string())),
+        amount: json.get("amount").and_then(|v| v.as_str().and_then(|s| s.parse().ok())),
+        price: json.get("price").and_then(|v| v.as_str().and_then(|s| s.parse().ok())),
+        order_type: json.get("orderType").and_then(|v| v.as_str().map(|s| s.to_string())),
+        limit_type: json.get("limitType").and_then(|v| v.as_str().map(|s| s.to_string())),
+        timestamp: json.get("timestamp").and_then(|v| v.as_str().map(|s| s.to_string())),
+    })
 }
