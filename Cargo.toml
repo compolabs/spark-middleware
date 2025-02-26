@@ -9,20 +9,18 @@ anyhow = "1.0.92"
 async-graphql = "7.0.9"
 async-graphql-rocket = "7.0.9"
 async-trait = "0.1.86"
-async-tungstenite = { version = "0.28", features = ["tokio-runtime"] }
-chrono = { version = "0.4.38", features = ["serde"] }
+async-tungstenite = { version = "0.29", features = ["tokio-runtime"] }
+chrono = { version = "=0.4.39", features = ["serde"] }
 ctrlc = "3.4"
 dotenv = "0.15.0"
 ethers-core = "2.0.14"
-fuel-core-types = "0.40.2"
-fuel-crypto = "0.58.2"
+fuel-core-types = "0.41.7"
 fuels = { version = "0.66.10", features = ["fuel-core-lib"] }
 futures-util = "0.3"
 graphql_client = "0.14.0"
 hex = "0.4.3"
 lazy_static = "1.5.0"
-pangea-client = "0.3.5" 
-#pangea-client = { git = "https://github.com/nazgull08/pangea-client.git", branch = "master" }
+pangea-client = "0.3.6" 
 prometheus = "0.13.4"
 reqwest = "0.12.12"
 rocket = { version = "0.5.0-rc.3", features = ["json"] }

@@ -1,5 +1,4 @@
 use async_trait::async_trait;
-use ethers_core::types::H256;
 use fuels::accounts::provider::Provider;
 use fuels::types::Address;
 use pangea_client::{
@@ -9,9 +8,10 @@ use pangea_client::{
 use pangea_client::{ChainId, Client};
 use tokio::task::JoinHandle;
 use std::collections::HashSet;
-use std::str::FromStr;
+//use fuel_core_types::fuel_types::Address;
 use std::sync::Arc;
 use std::time::Duration;
+use std::str::FromStr;
 use tokio::time::sleep;
 use tracing::{debug, error, info, warn};
 
