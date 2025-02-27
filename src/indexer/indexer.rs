@@ -1,6 +1,6 @@
+use crate::error::Error;
 use async_trait::async_trait;
 use tokio::task::JoinHandle;
-use crate::error::Error;
 
 #[async_trait]
 pub trait Indexer: Send + Sync {

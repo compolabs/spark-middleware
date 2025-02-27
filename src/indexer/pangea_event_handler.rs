@@ -82,8 +82,11 @@ pub async fn handle_order_event(
 }
 
 fn create_new_order_from_event(event: &PangeaOrderEvent) -> Option<SpotOrder> {
-    info!("creating new order: \n======================== {:?}\n=======================", event);
-    if let (Some(price), Some(amount), Some(order_type), Some(limit_type),  Some(user)) = (
+    info!(
+        "creating new order: \n======================== {:?}\n=======================",
+        event
+    );
+    if let (Some(price), Some(amount), Some(order_type), Some(limit_type), Some(user)) = (
         event.price,
         event.amount,
         event.order_type.as_deref(),
@@ -95,7 +98,7 @@ fn create_new_order_from_event(event: &PangeaOrderEvent) -> Option<SpotOrder> {
             "Sell" => OrderType::Sell,
             _ => return None,
         };
-        let limit_type_enum = match  limit_type {
+        let limit_type_enum = match limit_type {
             "GTC" => Some(LimitType::GTC),
             "IOC" => Some(LimitType::IOC),
             "FOK" => Some(LimitType::FOK),

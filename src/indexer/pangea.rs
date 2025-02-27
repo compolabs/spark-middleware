@@ -6,12 +6,12 @@ use pangea_client::{
     ClientBuilder, Format, WsProvider,
 };
 use pangea_client::{ChainId, Client};
-use tokio::task::JoinHandle;
 use std::collections::HashSet;
+use tokio::task::JoinHandle;
 //use fuel_core_types::fuel_types::Address;
+use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Duration;
-use std::str::FromStr;
 use tokio::time::sleep;
 use tracing::{debug, error, info, warn};
 
@@ -24,7 +24,7 @@ use crate::{
     BUY_ORDERS_TOTAL, ERRORS_TOTAL, ORDER_PROCESSING_DURATION, SELL_ORDERS_TOTAL, SYNC_STATUS,
 };
 
-use super::indexer::Indexer;
+use super::Indexer;
 
 pub struct PangeaIndexer {
     storage: Arc<OrderStorage>,
@@ -60,13 +60,8 @@ async fn start_pangea_indexer(storage: Arc<OrderStorage>) -> Result<(), Error> {
 
     info!("🔄 Starting sync from block {}...", contract_start_block);
 
-    let mut last_processed_block = fetch_historical_data(
-        &client,
-        &storage,
-        contract_start_block,
-        contract_h256,
-    )
-    .await?;
+    let mut last_processed_block =
+        fetch_historical_data(&client, &storage, contract_start_block, contract_h256).await?;
 
     if last_processed_block == 0 {
         last_processed_block = contract_start_block;

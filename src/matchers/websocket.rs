@@ -18,7 +18,7 @@ pub struct MatcherWebSocket {
 
 impl MatcherWebSocket {
     pub fn new(storage: Arc<OrderStorage>) -> Self {
-        Self {storage}
+        Self { storage }
     }
 
     pub async fn handle_connection(self: Arc<Self>, ws_stream: WebSocketStream<TcpStream>) {
@@ -61,7 +61,7 @@ impl MatcherWebSocket {
         uuid: String,
     ) {
         let batch_size = ev("BATCH_SIZE")
-            .unwrap_or_else(|_| "25".into()) 
+            .unwrap_or_else(|_| "25".into())
             .parse()
             .unwrap_or(10);
 
@@ -122,7 +122,7 @@ impl MatcherWebSocket {
 
         let mut buy_index = 0;
         let mut sell_index = 0;
-        let mut new_matching_order_ids : Vec<String> = Vec::new();
+        let mut new_matching_order_ids: Vec<String> = Vec::new();
 
         while buy_index < buy_queue.len()
             && sell_index < sell_queue.len()

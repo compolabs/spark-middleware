@@ -5,7 +5,7 @@ use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::sync::Arc;
-use tracing::{debug, error, info, warn};
+use tracing::{debug, error, warn};
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct EnvioOrderEvent {
@@ -51,7 +51,10 @@ pub async fn handle_envio_event(
         "TradeOrderEvent" => {
             if let Some(order_id) = &event.order_id {
                 matching_orders.remove(order_id);
-                debug!("🔄 Order {} removed from matching_orders (Trade event)", order_id);
+                debug!(
+                    "🔄 Order {} removed from matching_orders (Trade event)",
+                    order_id
+                );
                 if let Some(match_size) = event.amount {
                     let o_type = event.order_type_to_enum();
                     let l_type = event.limit_type_to_enum();
@@ -83,11 +86,14 @@ fn create_new_order_from_event(event: &EnvioOrderEvent) -> Option<SpotOrder> {
         let real_order_id = match &event.order_id {
             Some(oid) => oid.clone(),
             None => {
-                warn!("No 'order_id' in event, fallback to 'id'. Event: {:?}", event);
+                warn!(
+                    "No 'order_id' in event, fallback to 'id'. Event: {:?}",
+                    event
+                );
                 event.id.clone()
             }
         };
-        
+
         let order_type_enum = match order_type {
             "Buy" => OrderType::Buy,
             "Sell" => OrderType::Sell,
@@ -134,7 +140,10 @@ fn process_trade(
                         order.amount -= trade_amount;
                         order.status = Some(OrderStatus::PartiallyMatched);
                         order_book.update_order(order.clone());
-                        debug!("Updated order with id: {} - partially matched, remaining amount: {}", order_id, order.amount);
+                        debug!(
+                            "Updated order with id: {} - partially matched, remaining amount: {}",
+                            order_id, order.amount
+                        );
                     } else {
                         order.status = Some(OrderStatus::Matched);
                         order_book.remove_order(order_id, Some(order_type));
@@ -150,43 +159,64 @@ fn process_trade(
             }
         }
     } else {
-        error!("Order type or limit type is None for order_id: {}. Cannot process trade event.", order_id);
+        error!(
+            "Order type or limit type is None for order_id: {}. Cannot process trade event.",
+            order_id
+        );
     }
 }
 
 impl EnvioOrderEvent {
     pub fn order_type_to_enum(&self) -> Option<OrderType> {
-        self.order_type.as_deref().and_then(|order_type| match order_type {
-            "Buy" => Some(OrderType::Buy),
-            "Sell" => Some(OrderType::Sell),
-            _ => None,
-        })
+        self.order_type
+            .as_deref()
+            .and_then(|order_type| match order_type {
+                "Buy" => Some(OrderType::Buy),
+                "Sell" => Some(OrderType::Sell),
+                _ => None,
+            })
     }
 
     pub fn limit_type_to_enum(&self) -> Option<LimitType> {
-        self.limit_type.as_deref().and_then(|limit_type| match limit_type {
-            "FOK" => Some(LimitType::FOK),
-            "IOC" => Some(LimitType::IOC),
-            "GTC" => Some(LimitType::GTC),
-            "MKT" => Some(LimitType::MKT),
-            _ => None,
-        })
+        self.limit_type
+            .as_deref()
+            .and_then(|limit_type| match limit_type {
+                "FOK" => Some(LimitType::FOK),
+                "IOC" => Some(LimitType::IOC),
+                "GTC" => Some(LimitType::GTC),
+                "MKT" => Some(LimitType::MKT),
+                _ => None,
+            })
     }
 }
-
-
 
 pub fn parse_envio_event(json: &Value, event_type: &str) -> Option<EnvioOrderEvent> {
     Some(EnvioOrderEvent {
         event_type: event_type.to_string(),
         id: json.get("id")?.as_str()?.to_string(),
-        order_id: json.get("orderId").and_then(|v| v.as_str().map(|s| s.to_string())),
-        user: json.get("user").and_then(|v| v.as_str().map(|s| s.to_string())),
-        asset: json.get("asset").and_then(|v| v.as_str().map(|s| s.to_string())),
-        amount: json.get("amount").and_then(|v| v.as_str().and_then(|s| s.parse().ok())),
-        price: json.get("price").and_then(|v| v.as_str().and_then(|s| s.parse().ok())),
-        order_type: json.get("orderType").and_then(|v| v.as_str().map(|s| s.to_string())),
-        limit_type: json.get("limitType").and_then(|v| v.as_str().map(|s| s.to_string())),
-        timestamp: json.get("timestamp").and_then(|v| v.as_str().map(|s| s.to_string())),
+        order_id: json
+            .get("orderId")
+            .and_then(|v| v.as_str().map(|s| s.to_string())),
+        user: json
+            .get("user")
+            .and_then(|v| v.as_str().map(|s| s.to_string())),
+        asset: json
+            .get("asset")
+            .and_then(|v| v.as_str().map(|s| s.to_string())),
+        amount: json
+            .get("amount")
+            .and_then(|v| v.as_str().and_then(|s| s.parse().ok())),
+        price: json
+            .get("price")
+            .and_then(|v| v.as_str().and_then(|s| s.parse().ok())),
+        order_type: json
+            .get("orderType")
+            .and_then(|v| v.as_str().map(|s| s.to_string())),
+        limit_type: json
+            .get("limitType")
+            .and_then(|v| v.as_str().map(|s| s.to_string())),
+        timestamp: json
+            .get("timestamp")
+            .and_then(|v| v.as_str().map(|s| s.to_string())),
     })
 }

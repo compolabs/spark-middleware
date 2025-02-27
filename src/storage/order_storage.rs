@@ -1,6 +1,7 @@
+use crate::storage::{matching_orders::MatchingOrders, order_book::OrderBook};
 use std::sync::Arc;
-use crate::storage::{order_book::OrderBook, matching_orders::MatchingOrders};
 
+#[derive(Default)]
 pub struct OrderStorage {
     pub order_book: Arc<OrderBook>,
     pub matching_orders: Arc<MatchingOrders>,

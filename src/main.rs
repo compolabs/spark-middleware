@@ -1,7 +1,7 @@
 use config::env::ev;
 use error::Error;
 use futures_util::future::{join_all, select, FutureExt};
-use indexer::{envio::EnvioIndexer, indexer::Indexer, pangea::PangeaIndexer};
+use indexer::{envio::EnvioIndexer, pangea::PangeaIndexer, Indexer};
 use lazy_static::lazy_static;
 use matchers::websocket::MatcherWebSocket;
 use prometheus::{
@@ -51,12 +51,15 @@ async fn main() -> Result<(), Error> {
     let storage = Arc::new(OrderStorage::new());
     let mut tasks = vec![];
 
-    let indexer_type = ev("INDEXER").unwrap_or_else(|_| "PANGEA".to_string()).to_uppercase();
+    let indexer_type = ev("INDEXER")
+        .unwrap_or_else(|_| "PANGEA".to_string())
+        .to_uppercase();
     info!("Selected indexer: {}", indexer_type);
 
     let indexer: Arc<dyn Indexer + Send + Sync> = match indexer_type.as_str() {
         "ENVIO" => Arc::new(EnvioIndexer::new(Arc::clone(&storage))),
-        "PANGEA" | _ => Arc::new(PangeaIndexer::new(Arc::clone(&storage))),
+        "PANGEA" => Arc::new(PangeaIndexer::new(Arc::clone(&storage))),
+        _ => Arc::new(PangeaIndexer::new(Arc::clone(&storage))),
     };
 
     indexer.initialize(&mut tasks).await?;
