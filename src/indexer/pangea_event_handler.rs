@@ -82,10 +82,6 @@ pub async fn handle_order_event(
 }
 
 fn create_new_order_from_event(event: &PangeaOrderEvent) -> Option<SpotOrder> {
-    info!(
-        "creating new order: \n======================== {:?}\n=======================",
-        event
-    );
     if let (Some(price), Some(amount), Some(order_type), Some(limit_type), Some(user)) = (
         event.price,
         event.amount,
