@@ -3,14 +3,14 @@ replicaCount: 1
 ingress:
   enabled: false
   hosts:
-    - host: spark-middleware.production.sprk.fi
+    - host: spark-middleware.production.v12.trade
       paths:
         - path: /
           pathType: Prefix
   tls:
     - secretName: spark-middleware-tls
       hosts:
-        - spark-middleware.production.sprk.fi
+        - spark-middleware.production.v12.trade
 
 vault:
   mount: production
