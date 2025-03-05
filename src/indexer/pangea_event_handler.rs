@@ -5,7 +5,7 @@ use chrono::Utc;
 use prometheus::{register_int_counter, IntCounter};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
-use tracing::{debug, error, info, warn};
+use tracing::{debug, error, warn};
 
 lazy_static::lazy_static! {
     static ref PROCESSED_ORDERS_TOTAL: IntCounter = register_int_counter!(
