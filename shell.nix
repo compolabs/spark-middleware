@@ -12,8 +12,11 @@ in pkgs.stdenv.mkDerivation rec {
   env = pkgs.buildEnv { name = name; paths = buildInputs; };
 
   buildInputs = [
-    pkgs.rustup
+    pkgs.clippy
+    pkgs.rustc
+    pkgs.cargo
     pkgs.openssl
+    pkgs.lld
   ] ++ lib.optional isDarwin pkgs.darwin.apple_sdk.frameworks.SystemConfiguration
     ++ lib.optional isDarwin pkgs.darwin.apple_sdk.frameworks.CoreFoundation
     ++ lib.optional isDarwin pkgs.darwin.apple_sdk.frameworks.Security;
