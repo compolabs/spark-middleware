@@ -43,7 +43,7 @@ async fn main() -> Result<(), Error> {
     dotenv::dotenv().ok();
 
     tracing_subscriber::fmt()
-        .with_target(false)
+        .with_target(true)
         .with_level(true)
         .init();
     info!("Logger initialized");
