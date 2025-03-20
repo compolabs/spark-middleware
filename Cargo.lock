@@ -6134,9 +6134,9 @@ dependencies = [
 
 [[package]]
 name = "pangea-client"
-version = "0.3.6"
+version = "0.3.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "34879d0e4a5c96cbd9160b370d28a1cdb08de797e4fc33b0412f67104c04d858"
+checksum = "be3523bdebb9cf633e9b448e3f67943a1fe704f85a01ff959ff933371f01f5b8"
 dependencies = [
  "arrow",
  "async-trait",
@@ -8007,7 +8007,7 @@ dependencies = [
 
 [[package]]
 name = "spark-middleware"
-version = "0.4.1"
+version = "0.4.2"
 dependencies = [
  "anyhow",
  "async-graphql",
