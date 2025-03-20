@@ -27,23 +27,8 @@ jobs:
           secrets: |
             management/data/${{ vars.VAULT_SECRET_PATH }} *
 
-      - name: Import production secrets from Vault
-        id: production
-        uses: hashicorp/vault-action@v3
-        with:
-          url: ${{ vars.VAULT_ADDR }}
-          path: management
-          method: kubernetes
-          role: production-${{ env.REPO_NAME }}
-          secrets: |
-            production/data/${{ env.REPO_NAME }}/${{ env.REPO_NAME }} *
-
       - name: Checkout code
         uses: actions/checkout@v4
-
-      # - name: Create .env file
-      #   run: |
-      #     echo ${{ env }} > .env
 
       - name: Login to Docker Registry
         uses: docker/login-action@v3
