@@ -115,7 +115,7 @@ async fn fetch_historical_data(
     };
     let mut last_processed_block = contract_start_block;
 
-    let target_latest_block = get_latest_block(fuel_chain).await?-10;
+    let target_latest_block = get_latest_block(fuel_chain).await?-5;
     info!("fuel latest block {:?}", target_latest_block);
     info!(
         "📌 Syncing historical data from block {} to {}...",
